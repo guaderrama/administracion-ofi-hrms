@@ -15,8 +15,11 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
+      // Permitir lectura a usuarios autenticados (para verificar si es el primer usuario)
       allow read: if isAuthenticated();
+      // Permitir crear solo el propio documento de usuario
       allow create: if isAuthenticated() && request.auth.uid == userId;
+      // Solo el propio usuario o admin puede actualizar/eliminar
       allow update, delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
 

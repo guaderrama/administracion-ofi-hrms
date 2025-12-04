@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { PermissionGeneratorPage } from './components/PermissionGeneratorPage';
 import { RequisitionsPage } from './components/RequisitionsPage';
@@ -11,8 +11,18 @@ import { LoginPage } from './components/auth/LoginPage';
 import { useAuth } from './src/contexts/AuthContext';
 
 const App: React.FC = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
   const [currentView, setCurrentView] = useState('dashboard');
+
+  // Proteger rutas de admin - redirigir si no es admin
+  useEffect(() => {
+    if (!loading && user && !isAdmin) {
+      const adminOnlyRoutes = ['admin', 'requisitions'];
+      if (adminOnlyRoutes.includes(currentView)) {
+        setCurrentView('dashboard');
+      }
+    }
+  }, [currentView, isAdmin, loading, user]);
 
   const renderView = () => {
     // Enrutamiento simple basado en el string de la vista
@@ -34,11 +44,14 @@ const App: React.FC = () => {
         // Futuras vistas de RH podrían ir aquí
         return <div className="p-8 text-center"><p>Seleccione una herramienta de Recursos Humanos.</p></div>;
       case 'requisitions':
-         // Por ahora, solo hay una vista posible en requisiciones
+         // Solo admin puede ver requisiciones
+        if (!isAdmin) return <DashboardPage />;
         return <RequisitionsPage />;
       case 'checador':
         return <ChecadorPage />;
       case 'admin':
+        // Solo admin puede ver el panel de administrador
+        if (!isAdmin) return <DashboardPage />;
         return <AdminPage setView={setCurrentView} />;
       default:
         // Vista por defecto si ninguna coincide

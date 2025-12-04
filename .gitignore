@@ -36,3 +36,6 @@ firestore-debug.log
 # Service account keys (NEVER commit these)
 *-sa-key.json
 serviceAccountKey.json
+
+# IDX/Firebase Studio MCP config (contains API keys)
+.idx/mcp.json

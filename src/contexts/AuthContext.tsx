@@ -1,6 +1,5 @@
-// AuthContext - Contexto de autenticación Firebase
-// Este archivo provee estado de autenticación a toda la app
-// NO modifica componentes existentes - es una capa adicional
+// AuthContext - Contexto de autenticación Firebase con roles
+// Provee estado de autenticación y rol del usuario a toda la app
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import {
@@ -11,13 +10,28 @@ import {
   signOut,
   UserCredential
 } from 'firebase/auth';
-import { auth } from '../firebaseConfig';
+import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { auth, db } from '../firebaseConfig';
+
+// Tipos de roles
+export type UserRole = 'admin' | 'employee';
+
+// Datos del usuario en Firestore
+export interface UserData {
+  uid: string;
+  email: string;
+  role: UserRole;
+  displayName?: string;
+  createdAt: Date;
+}
 
 // Tipos para el contexto
 interface AuthContextType {
   user: User | null;
+  userData: UserData | null;
   loading: boolean;
   error: string | null;
+  isAdmin: boolean;
   login: (email: string, password: string) => Promise<UserCredential>;
   register: (email: string, password: string) => Promise<UserCredential>;
   logout: () => Promise<void>;
@@ -26,8 +40,10 @@ interface AuthContextType {
 // Valor inicial del contexto
 const AuthContext = createContext<AuthContextType>({
   user: null,
+  userData: null,
   loading: true,
   error: null,
+  isAdmin: false,
   login: async () => { throw new Error('AuthProvider not initialized'); },
   register: async () => { throw new Error('AuthProvider not initialized'); },
   logout: async () => { throw new Error('AuthProvider not initialized'); },
@@ -50,13 +66,62 @@ interface AuthProviderProps {
 // Provider de autenticación
 export function AuthProvider({ children }: AuthProviderProps): React.ReactElement {
   const [user, setUser] = useState<User | null>(null);
+  const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Función para obtener datos del usuario de Firestore
+  const fetchUserData = async (uid: string): Promise<UserData | null> => {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      if (userDoc.exists()) {
+        return userDoc.data() as UserData;
+      }
+      return null;
+    } catch (err) {
+      console.error('Error fetching user data:', err);
+      return null;
+    }
+  };
+
+  // Función para crear usuario en Firestore
+  const createUserData = async (user: User, role: UserRole): Promise<UserData> => {
+    const newUserData: UserData = {
+      uid: user.uid,
+      email: user.email || '',
+      role: role,
+      displayName: user.displayName || user.email?.split('@')[0] || '',
+      createdAt: new Date(),
+    };
+
+    await setDoc(doc(db, 'users', user.uid), newUserData);
+    return newUserData;
+  };
+
+  // Verificar si es el primer usuario (será admin)
+  const checkIfFirstUser = async (): Promise<boolean> => {
+    try {
+      const usersSnapshot = await getDocs(collection(db, 'users'));
+      return usersSnapshot.empty;
+    } catch (err) {
+      console.error('Error checking first user:', err);
+      return false;
+    }
+  };
+
   // Escuchar cambios en el estado de autenticación
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+
+      if (currentUser) {
+        // Obtener datos del usuario de Firestore
+        const data = await fetchUserData(currentUser.uid);
+        setUserData(data);
+      } else {
+        setUserData(null);
+      }
+
       setLoading(false);
     }, (err) => {
       console.error('Auth state change error:', err);
@@ -64,7 +129,6 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
       setLoading(false);
     });
 
-    // Cleanup subscription
     return () => unsubscribe();
   }, []);
 
@@ -73,6 +137,9 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
     setError(null);
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
+      // Obtener datos del usuario después del login
+      const data = await fetchUserData(result.user.uid);
+      setUserData(data);
       return result;
     } catch (err: any) {
       setError(err.message);
@@ -85,6 +152,15 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
     setError(null);
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
+
+      // Verificar si es el primer usuario
+      const isFirst = await checkIfFirstUser();
+      const role: UserRole = isFirst ? 'admin' : 'employee';
+
+      // Crear datos del usuario en Firestore
+      const newUserData = await createUserData(result.user, role);
+      setUserData(newUserData);
+
       return result;
     } catch (err: any) {
       setError(err.message);
@@ -97,6 +173,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
     setError(null);
     try {
       await signOut(auth);
+      setUserData(null);
     } catch (err: any) {
       setError(err.message);
       throw err;
@@ -106,8 +183,10 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
   // Valor del contexto
   const value: AuthContextType = {
     user,
+    userData,
     loading,
     error,
+    isAdmin: userData?.role === 'admin',
     login,
     register,
     logout,
