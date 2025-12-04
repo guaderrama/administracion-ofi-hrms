@@ -1,7 +1,20 @@
-#Genkit
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+</div>
 
-This is a simple demonstration web app using the [Genkit Library](https://github.com/firebase/genkit) with Gemini to characters for an adventure game.
+# Run and deploy your AI Studio app
 
-In IDX, get started by with API key at https://g.co/ai/idxGetGeminiKey and enter it in `.idx/dev.nix` and rebuild the environment.
+This contains everything you need to run your app locally.
 
-After rebuilding the environment, open a new terminal (`Ctrl`+ `` ` ``) and follow the link that said "Genkit Developer UI" to use Genkit's built-in local developer playground.
+View your app in AI Studio: https://ai.studio/apps/drive/1qBt2j0rWq42RnUJbV88fdGPYyW-EIeRe
+
+## Run Locally
+
+**Prerequisites:**  Node.js
+
+
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`

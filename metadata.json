@@ -1,0 +1,7 @@
+{
+  "name": "PORTAL INTERNO IVAN GUADERRAMA ART",
+  "description": "Una aplicación para que los colaboradores de la empresa IVAN GUADERRAMA ART puedan generar solicitudes de permiso laboral en formato PDF.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
