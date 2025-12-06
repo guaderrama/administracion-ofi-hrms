@@ -23,15 +23,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({ employeeName, onLogin, o
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-2xl p-8 max-w-sm w-full m-4">
         <h2 className="text-xl font-bold text-slate-800 text-center">Hola, {employeeName}</h2>
-        <p className="text-center text-slate-600 mt-1 mb-6">Por favor, ingrese su PIN de 4 dígitos.</p>
+        <p className="text-center text-slate-600 mt-1 mb-6">Por favor, ingrese su PIN de 6 dígitos.</p>
         <form onSubmit={handleSubmit}>
           <input
             ref={inputRef}
             type="password"
-            maxLength={4}
+            maxLength={6}
             value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            className="w-full text-center text-3xl font-mono tracking-[1.5em] bg-white/40 border border-slate-300 rounded-md p-3 focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+            className="w-full text-center text-3xl font-mono tracking-[0.8em] bg-white/40 border border-slate-300 rounded-md p-3 focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+            inputMode="numeric"
+            pattern="[0-9]*"
           />
           <div className="mt-6 grid grid-cols-2 gap-3">
             <button
@@ -43,7 +45,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ employeeName, onLogin, o
             </button>
             <button
               type="submit"
-              disabled={pin.length !== 4}
+              disabled={pin.length !== 6}
               className="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 disabled:from-amber-400 disabled:to-orange-400 disabled:cursor-not-allowed"
             >
               Entrar

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { EmployeeSelector } from './EmployeeSelector';
 import { LoginModal } from './LoginModal';
 import { ActionButtons } from './ActionButtons';
@@ -8,17 +8,111 @@ import { Header } from './Header';
 import { IncomeForm } from './IncomeForm';
 import { IncomeTable } from './IncomeTable';
 import { IncomeChart } from './IncomeChart';
-import type { Employee, LogEntry, Location, IncomeEntry } from '../../types';
+import type { Employee, LogEntry, Location, IncomeEntry, DetailedEmployee } from '../../types';
 import { ClockStatus, LogType } from '../../types';
 import { EMPLOYEES } from '../../checadorConstants';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 export const ChecadorPage: React.FC = () => {
+    const { user, userData, isAdmin } = useAuth();
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
     const [authenticatedEmployee, setAuthenticatedEmployee] = useState<Employee | null>(null);
     const [dailyLogs, setDailyLogs] = useState<LogEntry[]>([]);
     const [clockStatus, setClockStatus] = useState<ClockStatus>(ClockStatus.OUT_OF_OFFICE);
     const [owedHours, setOwedHours] = useState<number>(0);
     const [incomes, setIncomes] = useState<IncomeEntry[]>([]);
+
+    // Función para obtener el PIN correcto de detailed_employees o EMPLOYEES
+    const getEmployeePin = useCallback((employeeName: string): string => {
+        const storedEmployeesStr = localStorage.getItem('detailed_employees');
+        if (storedEmployeesStr) {
+            const detailedEmployees: DetailedEmployee[] = JSON.parse(storedEmployeesStr);
+            // Buscar por nombre similar
+            const matchingDetailedEmp = detailedEmployees.find(emp => {
+                const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
+                const empNameNormalized = employeeName.toUpperCase().trim();
+                return empNameNormalized === fullName ||
+                       (empNameNormalized.includes(emp.paterno.toUpperCase()) &&
+                        empNameNormalized.includes(emp.nombres.toUpperCase()));
+            });
+            if (matchingDetailedEmp && matchingDetailedEmp.codigo) {
+                return matchingDetailedEmp.codigo;
+            }
+        }
+        // Fallback al PIN de EMPLOYEES
+        const empFromConstants = EMPLOYEES.find(e => e.name === employeeName);
+        return empFromConstants?.pin || '';
+    }, []);
+
+    // Generar lista de empleados con PINs sincronizados desde detailed_employees
+    const syncedEmployees = useMemo((): Employee[] => {
+        const storedEmployeesStr = localStorage.getItem('detailed_employees');
+        if (!storedEmployeesStr) return EMPLOYEES;
+
+        const detailedEmployees: DetailedEmployee[] = JSON.parse(storedEmployeesStr);
+
+        // Actualizar PINs de EMPLOYEES con los códigos de detailed_employees
+        return EMPLOYEES.map(emp => {
+            const matchingDetailedEmp = detailedEmployees.find(detEmp => {
+                const fullName = `${detEmp.paterno} ${detEmp.materno} ${detEmp.nombres}`.toUpperCase().trim();
+                const empNameNormalized = emp.name.toUpperCase().trim();
+                return empNameNormalized === fullName ||
+                       (empNameNormalized.includes(detEmp.paterno.toUpperCase()) &&
+                        empNameNormalized.includes(detEmp.nombres.toUpperCase()));
+            });
+
+            if (matchingDetailedEmp && matchingDetailedEmp.codigo) {
+                return { ...emp, pin: matchingDetailedEmp.codigo };
+            }
+            return emp;
+        });
+    }, []);
+
+    // Filtrar empleados según el usuario autenticado
+    // Admin ve todos, empleado solo ve su propio nombre
+    const filteredEmployees = useMemo(() => {
+        // Si es admin, mostrar todos los empleados (con PINs sincronizados)
+        if (isAdmin) {
+            return syncedEmployees;
+        }
+
+        // Si es empleado, buscar su registro en detailed_employees por email
+        const userEmail = user?.email;
+        if (!userEmail) return syncedEmployees; // Fallback si no hay email
+
+        // Buscar en detailed_employees (localStorage) para encontrar el nombre del empleado
+        const storedEmployeesStr = localStorage.getItem('detailed_employees');
+        if (storedEmployeesStr) {
+            const detailedEmployees: DetailedEmployee[] = JSON.parse(storedEmployeesStr);
+            const matchingEmployee = detailedEmployees.find(
+                emp => emp.email?.toLowerCase() === userEmail.toLowerCase()
+            );
+
+            if (matchingEmployee) {
+                // Buscar en syncedEmployees por nombre similar
+                const fullName = `${matchingEmployee.paterno} ${matchingEmployee.materno} ${matchingEmployee.nombres}`.toUpperCase();
+                const matchingChecadorEmployee = syncedEmployees.find(emp => {
+                    // Comparar nombres normalizados
+                    const empNameNormalized = emp.name.toUpperCase().trim();
+                    const fullNameNormalized = fullName.trim();
+                    return empNameNormalized === fullNameNormalized ||
+                           (empNameNormalized.includes(matchingEmployee.paterno.toUpperCase()) &&
+                           empNameNormalized.includes(matchingEmployee.nombres.toUpperCase()));
+                });
+
+                if (matchingChecadorEmployee) {
+                    // Usar el código de detailed_employees
+                    return [{
+                        ...matchingChecadorEmployee,
+                        pin: matchingEmployee.codigo || matchingChecadorEmployee.pin
+                    }];
+                }
+            }
+        }
+
+        // Si no se encuentra coincidencia, mostrar todos (fallback para admins o usuarios no encontrados)
+        return syncedEmployees;
+    }, [user, isAdmin, syncedEmployees]);
 
     const getTodayKey = (employeeName: string) => {
         const today = new Date().toISOString().slice(0, 10);
@@ -73,7 +167,6 @@ export const ChecadorPage: React.FC = () => {
         }
     }, []);
 
-
     useEffect(() => {
         if (authenticatedEmployee) {
             loadDailyLogs(authenticatedEmployee);
@@ -83,7 +176,9 @@ export const ChecadorPage: React.FC = () => {
     }, [authenticatedEmployee, loadDailyLogs, loadOwedHours, loadIncomes]);
 
     const handleEmployeeSelect = (employeeName: string) => {
-        const employee = EMPLOYEES.find(e => e.name === employeeName);
+        // Buscar primero en la lista filtrada, luego en EMPLOYEES
+        const employee = filteredEmployees.find(e => e.name === employeeName) ||
+                        EMPLOYEES.find(e => e.name === employeeName);
         if (employee) {
             setSelectedEmployee(employee);
         }
@@ -194,7 +289,10 @@ export const ChecadorPage: React.FC = () => {
                 </div>
             ) : (
                 <div className="mt-8 max-w-sm mx-auto">
-                    <EmployeeSelector onSelect={handleEmployeeSelect} />
+                    <EmployeeSelector
+                        onSelect={handleEmployeeSelect}
+                        filteredEmployees={filteredEmployees}
+                    />
                 </div>
             )}
 

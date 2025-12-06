@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useMemo } from 'react';
-import type { PermissionRequest } from '../types';
+import type { PermissionRequest, DetailedEmployee } from '../types';
 import { PermissionType, Reason, Compensation, CompensationMethod } from '../types';
 import { PERMISSION_TYPE_OPTIONS, REASON_OPTIONS, COMPENSATION_OPTIONS, COMPENSATION_METHOD_OPTIONS } from '../constants';
 
@@ -46,6 +46,10 @@ const SelectField: React.FC<{ label: string; id: string; value: string; onChange
 
 
 export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGenerating }) => {
+  const [employeeCode, setEmployeeCode] = useState('');
+  const [codeError, setCodeError] = useState('');
+  const [employeeFound, setEmployeeFound] = useState(false);
+
   const [formData, setFormData] = useState<Omit<PermissionRequest, 'id' | 'status'>>({
     firstName: '',
     lastName: '',
@@ -67,6 +71,55 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
     compensationStartDate: '',
     compensationMinutesPerDay: 60,
   });
+
+  // Función para buscar empleado por código
+  const handleCodeSearch = useCallback((code: string) => {
+    setEmployeeCode(code);
+    setCodeError('');
+    setEmployeeFound(false);
+
+    if (code.length < 6) {
+      // Limpiar datos si el código es muy corto
+      if (code.length === 0) {
+        setFormData(prev => ({
+          ...prev,
+          firstName: '',
+          lastName: '',
+          motherLastName: '',
+        }));
+      }
+      return;
+    }
+
+    // Buscar en detailed_employees
+    const storedEmployeesStr = localStorage.getItem('detailed_employees');
+    if (!storedEmployeesStr) {
+      setCodeError('No hay empleados registrados en el sistema.');
+      return;
+    }
+
+    const detailedEmployees: DetailedEmployee[] = JSON.parse(storedEmployeesStr);
+    const foundEmployee = detailedEmployees.find(emp => emp.codigo === code);
+
+    if (foundEmployee) {
+      setFormData(prev => ({
+        ...prev,
+        firstName: foundEmployee.nombres,
+        lastName: foundEmployee.paterno,
+        motherLastName: foundEmployee.materno,
+      }));
+      setEmployeeFound(true);
+      setCodeError('');
+    } else {
+      setCodeError('Código no encontrado. Verifica e intenta de nuevo.');
+      setFormData(prev => ({
+        ...prev,
+        firstName: '',
+        lastName: '',
+        motherLastName: '',
+      }));
+    }
+  }, []);
 
   const [dateToAdd, setDateToAdd] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -315,10 +368,45 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 space-y-4">
         <h3 className="text-lg leading-6 font-medium text-slate-800">Datos del Colaborador</h3>
+
+        {/* Campo de código para búsqueda automática */}
+        <div className="p-4 bg-amber-50/50 border border-amber-200 rounded-lg">
+          <label htmlFor="employeeCode" className="block text-sm font-medium text-amber-800 mb-1">
+            Código de Empleado (6 dígitos)
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              id="employeeCode"
+              value={employeeCode}
+              onChange={(e) => handleCodeSearch(e.target.value.replace(/[^0-9-]/g, ''))}
+              maxLength={8}
+              placeholder="Ej: 150590"
+              className={`flex-1 px-3 py-2 bg-white border rounded-md shadow-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent sm:text-sm ${
+                codeError ? 'border-red-300' : employeeFound ? 'border-green-300' : 'border-amber-300'
+              }`}
+            />
+            {employeeFound && (
+              <span className="inline-flex items-center px-3 py-2 rounded-md bg-green-100 text-green-800 text-sm font-medium">
+                <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                Encontrado
+              </span>
+            )}
+          </div>
+          {codeError && (
+            <p className="mt-1 text-sm text-red-600">{codeError}</p>
+          )}
+          <p className="mt-1 text-xs text-amber-600">
+            Ingresa tu código de 6 dígitos para autocompletar tus datos.
+          </p>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <InputField label="Nombre(s)" id="firstName" value={formData.firstName} onChange={handleChange} />
-            <InputField label="Apellido Paterno" id="lastName" value={formData.lastName} onChange={handleChange} />
-            <InputField label="Apellido Materno" id="motherLastName" value={formData.motherLastName} onChange={handleChange} />
+            <InputField label="Nombre(s)" id="firstName" value={formData.firstName} onChange={handleChange} readOnly={employeeFound} />
+            <InputField label="Apellido Paterno" id="lastName" value={formData.lastName} onChange={handleChange} readOnly={employeeFound} />
+            <InputField label="Apellido Materno" id="motherLastName" value={formData.motherLastName} onChange={handleChange} readOnly={employeeFound} />
         </div>
       </div>
       

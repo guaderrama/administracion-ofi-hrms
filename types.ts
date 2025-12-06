@@ -129,6 +129,8 @@ export interface LogEntry {
 export interface DetailedEmployee {
   id: string;
   codigo: string;
+  email: string; // Email para login
+  firebaseUid?: string; // UID de Firebase Auth
   paterno: string;
   materno: string;
   nombres: string;

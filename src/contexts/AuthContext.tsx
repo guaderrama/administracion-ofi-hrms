@@ -138,7 +138,15 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
       // Obtener datos del usuario después del login
-      const data = await fetchUserData(result.user.uid);
+      let data = await fetchUserData(result.user.uid);
+
+      // Si el usuario existe en Auth pero no en Firestore, crear documento
+      if (!data) {
+        const isFirst = await checkIfFirstUser();
+        const role: UserRole = isFirst ? 'admin' : 'employee';
+        data = await createUserData(result.user, role);
+      }
+
       setUserData(data);
       return result;
     } catch (err: any) {

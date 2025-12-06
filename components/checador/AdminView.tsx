@@ -6,6 +6,9 @@ import { AdminLogTable } from './AdminLogTable';
 import { IncidentsReport } from './IncidentsReport';
 import { WorkedHoursSummary } from './WorkedHoursSummary';
 import { DownloadIcon } from './icons/DownloadIcon';
+import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMethodsForEmail } from 'firebase/auth';
+import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
+import { auth, db } from '../../src/firebaseConfig';
 
 interface AdminViewProps {
   onExit: () => void;
@@ -116,7 +119,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const [permissionRequests, setPermissionRequests] = useState<PermissionRequest[]>([]);
   const timeOptions = useMemo(() => generateTimeOptions(), []);
   
-  const initialFormState: Omit<DetailedEmployee, 'id' | 'codigo' | 'horarioLunesMiercolesViernes' | 'horarioJueves' | 'horarioSabado'> = {
+  const initialFormState: Omit<DetailedEmployee, 'id' | 'codigo' | 'horarioLunesMiercolesViernes' | 'horarioJueves' | 'horarioSabado' | 'firebaseUid'> = {
+    email: '',
     paterno: '',
     materno: '',
     nombres: '',
@@ -133,6 +137,17 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   };
   const [newEmployee, setNewEmployee] = useState(initialFormState);
   const [isEmployeeSectionVisible, setIsEmployeeSectionVisible] = useState(false);
+
+  // Estado para edición de colaboradores
+  const [editingEmployee, setEditingEmployee] = useState<DetailedEmployee | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // Estado para crear cuenta de acceso
+  const [creatingAccountForId, setCreatingAccountForId] = useState<string | null>(null);
+
+  // Estado para restablecer contraseña
+  const [resettingPasswordForId, setResettingPasswordForId] = useState<string | null>(null);
   
   const initialScheduleState = {
     lunesMiercolesViernesEntrada: '09:00',
@@ -299,17 +314,30 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     URL.revokeObjectURL(url);
   };
 
+  const handleNewEmployeeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type } = e.target;
+    setNewEmployee(prev => ({
+      ...prev,
+      [name]: type === 'number' ? parseFloat(value) || 0 : value,
+    }));
+  };
+  
+  const handleScheduleFormChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setScheduleForm(prev => ({ ...prev, [name]: value }));
+  };
+
   const handleScheduleChange = (employeeName: string, field: keyof ScheduleConfig, value: string) => {
     setSchedules(prev => {
-        const currentSchedule = prev[employeeName] || { 
-            type: 'indeterminado', 
+        const currentSchedule = prev[employeeName] || {
+            type: 'indeterminado',
             time: EMPLOYEES.find(e => e.name === employeeName)?.scheduleStartTime || '09:00',
             startDate: '',
             endDate: '',
         };
 
         const newSchedule = { ...currentSchedule, [field]: value };
-        
+
         if (field === 'type' && value === 'indeterminado') {
             newSchedule.startDate = '';
             newSchedule.endDate = '';
@@ -324,66 +352,530 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     alert('Horarios guardados.');
   };
 
-  const handleNewEmployeeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type } = e.target;
-    setNewEmployee(prev => ({
-      ...prev,
-      [name]: type === 'number' ? parseFloat(value) || 0 : value,
-    }));
-  };
-  
-  const handleScheduleFormChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setScheduleForm(prev => ({ ...prev, [name]: value }));
-  };
+  const [isRegistering, setIsRegistering] = useState(false);
 
-  const handleRegisterEmployee = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleRegisterEmployee = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!newEmployee.nombres || !newEmployee.paterno || !newEmployee.fechaNacimiento) {
-      alert('Nombre(s), Apellido Paterno y Fecha de Cumpleaños son obligatorios.');
+    if (!newEmployee.nombres || !newEmployee.paterno || !newEmployee.fechaNacimiento || !newEmployee.email) {
+      alert('Nombre(s), Apellido Paterno, Fecha de Cumpleaños y Email son obligatorios.');
       return;
     }
 
-    const storedEmployeesStr = localStorage.getItem('detailed_employees');
-    const existingEmployees: DetailedEmployee[] = storedEmployeesStr ? JSON.parse(storedEmployeesStr) : [];
-    
-    const [year, month, day] = newEmployee.fechaNacimiento.split('-');
-    const baseCode = `${day}${month}${year.slice(-2)}`;
-    
-    let employeeCode = baseCode;
-    let counter = 1;
-    while (existingEmployees.some(emp => emp.codigo === employeeCode)) {
-        employeeCode = `${baseCode}-${counter}`;
-        counter++;
+    // Validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmployee.email)) {
+      alert('Por favor ingresa un email válido.');
+      return;
     }
-    
-    const finalHorarioLMV = `${scheduleForm.lunesMiercolesViernesEntrada} - ${scheduleForm.lunesMiercolesViernesSalida}`;
-    const finalHorarioJueves = scheduleForm.juevesTrabaja === 'si'
-        ? `${scheduleForm.juevesEntrada} - ${scheduleForm.juevesSalida}`
-        : 'No labora';
-    const finalHorarioSab = scheduleForm.sabadoTrabaja === 'si'
-        ? `${scheduleForm.sabEntrada} - ${scheduleForm.sabSalida}`
-        : 'No labora';
 
-    const newEmployeeRecord: DetailedEmployee = {
-      id: Date.now().toString(),
-      codigo: employeeCode,
-      ...newEmployee,
-      horarioLunesMiercolesViernes: finalHorarioLMV,
-      horarioJueves: finalHorarioJueves,
-      horarioSabado: finalHorarioSab,
-      bonoPuntualidad: Number(newEmployee.bonoPuntualidad),
-      bonoObjetivos: Number(newEmployee.bonoObjetivos),
-      apoyoGasolina: Number(newEmployee.apoyoGasolina),
-    };
-    
-    const updatedEmployees = [...existingEmployees, newEmployeeRecord];
-    localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
-    
-    setDetailedEmployees(updatedEmployees);
-    alert(`Colaborador ${newEmployee.nombres} ${newEmployee.paterno} registrado exitosamente. Código: ${employeeCode}`);
-    setNewEmployee(initialFormState);
-    setScheduleForm(initialScheduleState);
+    setIsRegistering(true);
+
+    try {
+      const storedEmployeesStr = localStorage.getItem('detailed_employees');
+      const existingEmployees: DetailedEmployee[] = storedEmployeesStr ? JSON.parse(storedEmployeesStr) : [];
+
+      // Verificar si el email ya existe en detailed_employees
+      if (existingEmployees.some(emp => emp.email === newEmployee.email)) {
+        alert('Ya existe un colaborador con este email en el panel.');
+        setIsRegistering(false);
+        return;
+      }
+
+      const [year, month, day] = newEmployee.fechaNacimiento.split('-');
+      const baseCode = `${day}${month}${year.slice(-2)}`;
+
+      let employeeCode = baseCode;
+      let counter = 1;
+      while (existingEmployees.some(emp => emp.codigo === employeeCode)) {
+          employeeCode = `${baseCode}-${counter}`;
+          counter++;
+      }
+
+      // Verificar si el email ya existe en Firebase Auth
+      const signInMethods = await fetchSignInMethodsForEmail(auth, newEmployee.email);
+
+      let firebaseUid: string | undefined = undefined;
+      let accountLinked = false;
+
+      if (signInMethods.length > 0) {
+        // El email ya existe en Firebase Auth - preguntar si vincular
+        const confirmLink = window.confirm(
+          `El email ${newEmployee.email} ya existe en el sistema de autenticación.\n\n` +
+          `¿Deseas vincular este colaborador con la cuenta existente?\n\n` +
+          `Si eliges "Aceptar", el colaborador se registrará y se vinculará a su cuenta.\n` +
+          `Puedes enviarle un email de restablecimiento de contraseña después.`
+        );
+
+        if (!confirmLink) {
+          setIsRegistering(false);
+          return;
+        }
+
+        // Buscar el UID existente en Firestore
+        const usersQuery = query(collection(db, 'users'), where('email', '==', newEmployee.email));
+        const querySnapshot = await getDocs(usersQuery);
+
+        if (!querySnapshot.empty) {
+          firebaseUid = querySnapshot.docs[0].id;
+          accountLinked = true;
+        } else {
+          // No hay documento en Firestore, el usuario existe en Auth pero sin perfil
+          // El colaborador se registrará sin firebaseUid y podrá vincularse después
+          accountLinked = false;
+        }
+      } else {
+        // El email no existe - crear cuenta nueva
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          newEmployee.email,
+          employeeCode // El código de 6 dígitos es la contraseña
+        );
+
+        // Crear documento en Firestore con rol 'employee'
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          uid: userCredential.user.uid,
+          email: newEmployee.email,
+          role: 'employee',
+          displayName: `${newEmployee.nombres} ${newEmployee.paterno}`,
+          createdAt: new Date(),
+        });
+
+        firebaseUid = userCredential.user.uid;
+      }
+
+      const finalHorarioLMV = `${scheduleForm.lunesMiercolesViernesEntrada} - ${scheduleForm.lunesMiercolesViernesSalida}`;
+      const finalHorarioJueves = scheduleForm.juevesTrabaja === 'si'
+          ? `${scheduleForm.juevesEntrada} - ${scheduleForm.juevesSalida}`
+          : 'No labora';
+      const finalHorarioSab = scheduleForm.sabadoTrabaja === 'si'
+          ? `${scheduleForm.sabEntrada} - ${scheduleForm.sabSalida}`
+          : 'No labora';
+
+      const newEmployeeRecord: DetailedEmployee = {
+        id: Date.now().toString(),
+        codigo: employeeCode,
+        email: newEmployee.email,
+        firebaseUid: firebaseUid,
+        paterno: newEmployee.paterno,
+        materno: newEmployee.materno,
+        nombres: newEmployee.nombres,
+        fechaIngreso: newEmployee.fechaIngreso,
+        fechaNacimiento: newEmployee.fechaNacimiento,
+        curp: newEmployee.curp,
+        rfc: newEmployee.rfc,
+        nss: newEmployee.nss,
+        departamento: newEmployee.departamento,
+        puesto: newEmployee.puesto,
+        horarioLunesMiercolesViernes: finalHorarioLMV,
+        horarioJueves: finalHorarioJueves,
+        horarioSabado: finalHorarioSab,
+        bonoPuntualidad: Number(newEmployee.bonoPuntualidad),
+        bonoObjetivos: Number(newEmployee.bonoObjetivos),
+        apoyoGasolina: Number(newEmployee.apoyoGasolina),
+      };
+
+      const updatedEmployees = [...existingEmployees, newEmployeeRecord];
+      localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
+
+      setDetailedEmployees(updatedEmployees);
+
+      // Mostrar mensaje según el caso
+      if (accountLinked) {
+        alert(
+          `Colaborador registrado y vinculado exitosamente!\n\n` +
+          `Nombre: ${newEmployee.nombres} ${newEmployee.paterno}\n` +
+          `Email: ${newEmployee.email}\n` +
+          `Código: ${employeeCode}\n\n` +
+          `La cuenta ya existía y ha sido vinculada.\n` +
+          `Puedes enviarle un email de restablecimiento de contraseña si lo necesita.`
+        );
+      } else if (firebaseUid) {
+        alert(
+          `Colaborador registrado exitosamente!\n\n` +
+          `Nombre: ${newEmployee.nombres} ${newEmployee.paterno}\n` +
+          `Email: ${newEmployee.email}\n` +
+          `Contraseña: ${employeeCode}\n\n` +
+          `El colaborador puede iniciar sesión con estas credenciales.`
+        );
+      } else {
+        alert(
+          `Colaborador registrado!\n\n` +
+          `Nombre: ${newEmployee.nombres} ${newEmployee.paterno}\n` +
+          `Email: ${newEmployee.email}\n` +
+          `Código: ${employeeCode}\n\n` +
+          `Nota: El email existe en Auth pero sin perfil vinculado.\n` +
+          `El colaborador debe iniciar sesión para completar la vinculación,\n` +
+          `o puedes usar el botón de "Crear cuenta" después.`
+        );
+      }
+
+      setNewEmployee(initialFormState);
+      setScheduleForm(initialScheduleState);
+    } catch (error: any) {
+      console.error('Error al registrar colaborador:', error);
+      if (error.code === 'auth/email-already-in-use') {
+        // El email ya existe en Firebase Auth - ofrecer vincular
+        const confirmLink = window.confirm(
+          `El email ${newEmployee.email} ya existe en el sistema de autenticación.\n\n` +
+          `¿Deseas registrar este colaborador y vincularlo con la cuenta existente?\n\n` +
+          `Si eliges "Aceptar", el colaborador se registrará sin crear cuenta nueva.\n` +
+          `Puedes enviarle un email de restablecimiento de contraseña después.`
+        );
+
+        if (confirmLink) {
+          try {
+            // Obtener empleados existentes
+            const storedEmployeesStr = localStorage.getItem('detailed_employees');
+            const existingEmployees: DetailedEmployee[] = storedEmployeesStr ? JSON.parse(storedEmployeesStr) : [];
+
+            // Generar código
+            const [year, month, day] = newEmployee.fechaNacimiento.split('-');
+            const baseCode = `${day}${month}${year.slice(-2)}`;
+            let employeeCode = baseCode;
+            let counter = 1;
+            while (existingEmployees.some(emp => emp.codigo === employeeCode)) {
+              employeeCode = `${baseCode}-${counter}`;
+              counter++;
+            }
+
+            // Buscar el UID existente en Firestore
+            let firebaseUid: string | undefined = undefined;
+            const usersQuery = query(collection(db, 'users'), where('email', '==', newEmployee.email));
+            const querySnapshot = await getDocs(usersQuery);
+
+            if (!querySnapshot.empty) {
+              firebaseUid = querySnapshot.docs[0].id;
+            }
+
+            // Preparar horarios
+            const finalHorarioLMV = `${scheduleForm.lunesMiercolesViernesEntrada} - ${scheduleForm.lunesMiercolesViernesSalida}`;
+            const finalHorarioJueves = scheduleForm.juevesTrabaja === 'si'
+              ? `${scheduleForm.juevesEntrada} - ${scheduleForm.juevesSalida}`
+              : 'No labora';
+            const finalHorarioSab = scheduleForm.sabadoTrabaja === 'si'
+              ? `${scheduleForm.sabEntrada} - ${scheduleForm.sabSalida}`
+              : 'No labora';
+
+            // Crear registro del empleado SIN crear cuenta en Firebase Auth
+            const newEmployeeRecord: DetailedEmployee = {
+              id: Date.now().toString(),
+              codigo: employeeCode,
+              email: newEmployee.email,
+              firebaseUid: firebaseUid,
+              paterno: newEmployee.paterno,
+              materno: newEmployee.materno,
+              nombres: newEmployee.nombres,
+              fechaIngreso: newEmployee.fechaIngreso,
+              fechaNacimiento: newEmployee.fechaNacimiento,
+              curp: newEmployee.curp,
+              rfc: newEmployee.rfc,
+              nss: newEmployee.nss,
+              departamento: newEmployee.departamento,
+              puesto: newEmployee.puesto,
+              horarioLunesMiercolesViernes: finalHorarioLMV,
+              horarioJueves: finalHorarioJueves,
+              horarioSabado: finalHorarioSab,
+              bonoPuntualidad: Number(newEmployee.bonoPuntualidad),
+              bonoObjetivos: Number(newEmployee.bonoObjetivos),
+              apoyoGasolina: Number(newEmployee.apoyoGasolina),
+            };
+
+            const updatedEmployees = [...existingEmployees, newEmployeeRecord];
+            localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
+            setDetailedEmployees(updatedEmployees);
+
+            alert(
+              `Colaborador registrado y vinculado exitosamente!\n\n` +
+              `Nombre: ${newEmployee.nombres} ${newEmployee.paterno}\n` +
+              `Email: ${newEmployee.email}\n` +
+              `Código: ${employeeCode}\n\n` +
+              `La cuenta ya existía en Firebase Auth y ha sido vinculada.\n` +
+              `Puedes enviarle un email de restablecimiento de contraseña si lo necesita.`
+            );
+
+            setNewEmployee(initialFormState);
+            setScheduleForm(initialScheduleState);
+          } catch (linkError: any) {
+            console.error('Error al vincular cuenta existente:', linkError);
+            alert(`Error al vincular: ${linkError.message}`);
+          }
+        }
+      } else if (error.code === 'auth/weak-password') {
+        alert('El código generado es muy débil. Contacta al administrador del sistema.');
+      } else {
+        alert(`Error al registrar: ${error.message}`);
+      }
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
+  // Función para abrir modal de edición
+  const handleEditEmployee = (employee: DetailedEmployee) => {
+    setEditingEmployee({ ...employee });
+    setIsEditModalOpen(true);
+  };
+
+  // Función para guardar cambios de edición
+  const handleSaveEdit = async () => {
+    if (!editingEmployee) return;
+
+    setIsSavingEdit(true);
+    try {
+      const updatedEmployees = detailedEmployees.map(emp =>
+        emp.id === editingEmployee.id ? editingEmployee : emp
+      );
+
+      localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
+      setDetailedEmployees(updatedEmployees);
+
+      // Si el colaborador tiene cuenta Firebase, actualizar en Firestore
+      if (editingEmployee.firebaseUid) {
+        await setDoc(doc(db, 'users', editingEmployee.firebaseUid), {
+          displayName: `${editingEmployee.nombres} ${editingEmployee.paterno}`,
+          email: editingEmployee.email,
+        }, { merge: true });
+      }
+
+      alert('Colaborador actualizado exitosamente.');
+      setIsEditModalOpen(false);
+      setEditingEmployee(null);
+    } catch (error: any) {
+      console.error('Error al actualizar colaborador:', error);
+      alert(`Error al actualizar: ${error.message}`);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  // Función para eliminar colaborador
+  const handleDeleteEmployee = async (employee: DetailedEmployee) => {
+    const confirmDelete = window.confirm(
+      `¿Estás seguro de que deseas dar de baja a ${employee.nombres} ${employee.paterno}?\n\n` +
+      `Esta acción eliminará al colaborador del sistema.`
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      const updatedEmployees = detailedEmployees.filter(emp => emp.id !== employee.id);
+      localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
+      setDetailedEmployees(updatedEmployees);
+
+      // Nota: No eliminamos la cuenta de Firebase Auth por seguridad
+      // El admin puede desactivarla desde la consola de Firebase si es necesario
+
+      alert(`Colaborador ${employee.nombres} ${employee.paterno} dado de baja exitosamente.`);
+    } catch (error: any) {
+      console.error('Error al eliminar colaborador:', error);
+      alert(`Error al eliminar: ${error.message}`);
+    }
+  };
+
+  // Función para vincular empleado con cuenta Firebase existente
+  const handleLinkExistingAccount = async (employee: DetailedEmployee) => {
+    if (!employee.email) return;
+
+    setCreatingAccountForId(employee.id);
+
+    try {
+      // Buscar el usuario en Firestore por email
+      const usersQuery = query(collection(db, 'users'), where('email', '==', employee.email));
+      const querySnapshot = await getDocs(usersQuery);
+
+      if (!querySnapshot.empty) {
+        // Usuario encontrado en Firestore - vincular con ese UID
+        const existingUser = querySnapshot.docs[0];
+        const uid = existingUser.id;
+
+        // Actualizar el registro del empleado con el firebaseUid
+        const updatedEmployee: DetailedEmployee = {
+          ...employee,
+          firebaseUid: uid,
+        };
+
+        const updatedEmployees = detailedEmployees.map(emp =>
+          emp.id === employee.id ? updatedEmployee : emp
+        );
+
+        localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
+        setDetailedEmployees(updatedEmployees);
+
+        alert(
+          `Cuenta vinculada exitosamente!\n\n` +
+          `El colaborador ${employee.nombres} ${employee.paterno} ha sido vinculado a su cuenta existente.\n\n` +
+          `Puede enviarle un email de restablecimiento de contraseña si lo necesita.`
+        );
+      } else {
+        // No hay documento en Firestore pero sí en Auth
+        // Crear documento en Firestore (se creará cuando el usuario inicie sesión)
+        alert(
+          `El email existe en Firebase Auth pero no tiene perfil en Firestore.\n\n` +
+          `El colaborador debe iniciar sesión para completar su perfil, o puede eliminar la cuenta desde Firebase Console y crearla de nuevo.`
+        );
+      }
+    } catch (error: any) {
+      console.error('Error al vincular cuenta:', error);
+      alert(`Error al vincular cuenta: ${error.message}`);
+    } finally {
+      setCreatingAccountForId(null);
+    }
+  };
+
+  // Función para crear cuenta de acceso para empleados existentes
+  const handleCreateAccount = async (employee: DetailedEmployee) => {
+    // Validar que tenga email
+    if (!employee.email) {
+      alert('Este colaborador no tiene email registrado. Por favor, edita el registro y agrega un email primero.');
+      return;
+    }
+
+    // Validar que no tenga cuenta ya
+    if (employee.firebaseUid) {
+      alert('Este colaborador ya tiene una cuenta de acceso activa.');
+      return;
+    }
+
+    setCreatingAccountForId(employee.id);
+
+    try {
+      // Primero verificar si el email ya existe en Firebase Auth
+      const signInMethods = await fetchSignInMethodsForEmail(auth, employee.email);
+
+      if (signInMethods.length > 0) {
+        // El email ya existe - preguntar si quiere vincular
+        setCreatingAccountForId(null);
+
+        const confirmLink = window.confirm(
+          `El email ${employee.email} ya existe en el sistema de autenticación.\n\n` +
+          `¿Deseas vincular este colaborador con la cuenta existente?\n\n` +
+          `Si eliges "Aceptar", el colaborador podrá usar su cuenta actual.\n` +
+          `Puedes enviarle un email de restablecimiento de contraseña después.`
+        );
+
+        if (confirmLink) {
+          await handleLinkExistingAccount(employee);
+        }
+        return;
+      }
+
+      // El email no existe - proceder a crear cuenta nueva
+      const confirmCreate = window.confirm(
+        `¿Crear cuenta de acceso para ${employee.nombres} ${employee.paterno}?\n\n` +
+        `Email: ${employee.email}\n` +
+        `Contraseña: ${employee.codigo} (código de 6 dígitos)\n\n` +
+        `El colaborador podrá iniciar sesión con estas credenciales.`
+      );
+
+      if (!confirmCreate) {
+        setCreatingAccountForId(null);
+        return;
+      }
+
+      // Crear cuenta en Firebase Auth con el código como contraseña
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        employee.email,
+        employee.codigo // El código de 6 dígitos es la contraseña
+      );
+
+      // Crear documento en Firestore con rol 'employee'
+      await setDoc(doc(db, 'users', userCredential.user.uid), {
+        uid: userCredential.user.uid,
+        email: employee.email,
+        role: 'employee',
+        displayName: `${employee.nombres} ${employee.paterno}`,
+        createdAt: new Date(),
+      });
+
+      // Actualizar el registro del empleado con el firebaseUid
+      const updatedEmployee: DetailedEmployee = {
+        ...employee,
+        firebaseUid: userCredential.user.uid,
+      };
+
+      const updatedEmployees = detailedEmployees.map(emp =>
+        emp.id === employee.id ? updatedEmployee : emp
+      );
+
+      localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
+      setDetailedEmployees(updatedEmployees);
+
+      alert(
+        `Cuenta creada exitosamente!\n\n` +
+        `Nombre: ${employee.nombres} ${employee.paterno}\n` +
+        `Email: ${employee.email}\n` +
+        `Contraseña: ${employee.codigo}\n\n` +
+        `El colaborador puede iniciar sesión con estas credenciales.`
+      );
+    } catch (error: any) {
+      console.error('Error al crear cuenta:', error);
+      if (error.code === 'auth/email-already-in-use') {
+        // Esto no debería pasar ahora, pero por si acaso
+        const confirmLink = window.confirm(
+          `El email ya está registrado.\n\n` +
+          `¿Deseas vincular este colaborador con la cuenta existente?`
+        );
+        if (confirmLink) {
+          await handleLinkExistingAccount(employee);
+        }
+      } else if (error.code === 'auth/weak-password') {
+        alert('El código es muy corto para ser una contraseña segura. Firebase requiere mínimo 6 caracteres.');
+      } else if (error.code === 'auth/invalid-email') {
+        alert('El email no es válido. Por favor, verifica el formato.');
+      } else {
+        alert(`Error al crear cuenta: ${error.message}`);
+      }
+    } finally {
+      setCreatingAccountForId(null);
+    }
+  };
+
+  // Función para restablecer contraseña de un empleado
+  const handleResetPassword = async (employee: DetailedEmployee) => {
+    if (!employee.email) {
+      alert('Este colaborador no tiene email registrado.');
+      return;
+    }
+
+    const confirmReset = window.confirm(
+      `¿Enviar email de restablecimiento de contraseña a ${employee.nombres} ${employee.paterno}?\n\n` +
+      `Se enviará un correo a: ${employee.email}\n\n` +
+      `El colaborador recibirá un enlace para crear una nueva contraseña.`
+    );
+
+    if (!confirmReset) return;
+
+    setResettingPasswordForId(employee.id);
+
+    try {
+      await sendPasswordResetEmail(auth, employee.email);
+      alert(
+        `Email enviado exitosamente a ${employee.email}\n\n` +
+        `El colaborador debe revisar su bandeja de entrada (y spam) para restablecer su contraseña.`
+      );
+    } catch (error: any) {
+      console.error('Error al enviar email de restablecimiento:', error);
+      if (error.code === 'auth/user-not-found') {
+        alert('No existe una cuenta con este email. Primero debes crear la cuenta de acceso.');
+      } else if (error.code === 'auth/invalid-email') {
+        alert('El email no es válido.');
+      } else {
+        alert(`Error al enviar email: ${error.message}`);
+      }
+    } finally {
+      setResettingPasswordForId(null);
+    }
+  };
+
+  // Función para manejar cambios en el formulario de edición
+  const handleEditFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!editingEmployee) return;
+    const { name, value, type } = e.target;
+    setEditingEmployee({
+      ...editingEmployee,
+      [name]: type === 'number' ? parseFloat(value) || 0 : value,
+    });
   };
 
   const handleDownloadEmployeesCSV = () => {
@@ -557,18 +1049,18 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                         <div key={emp.name} className="p-3 bg-slate-50/50 rounded-md border border-slate-200 space-y-2">
                             <label className="text-sm text-slate-800 font-medium block">{emp.name}</label>
                             <div className="grid grid-cols-2 gap-2">
-                              <select 
-                                  value={currentSchedule.type} 
+                              <select
+                                  value={currentSchedule.type}
                                   onChange={e => handleScheduleChange(emp.name, 'type', e.target.value)}
                                   className="w-full px-2 py-1 bg-white/40 border border-slate-300 rounded-md shadow-sm text-sm"
                               >
                                   <option value="indeterminado">Indeterminado</option>
                                   <option value="determinado">Determinado</option>
                               </select>
-                              <input 
-                                  type="time" 
-                                  value={currentSchedule.time} 
-                                  onChange={e => handleScheduleChange(emp.name, 'time', e.target.value)} 
+                              <input
+                                  type="time"
+                                  value={currentSchedule.time}
+                                  onChange={e => handleScheduleChange(emp.name, 'time', e.target.value)}
                                   className="w-full px-2 py-1 bg-white/40 border border-slate-300 rounded-md shadow-sm text-sm"
                               />
                             </div>
@@ -576,19 +1068,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                               <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 mt-2">
                                   <div>
                                       <label className="text-xs text-slate-600 block mb-1">Desde</label>
-                                      <input 
-                                          type="date" 
-                                          value={currentSchedule.startDate || ''} 
-                                          onChange={e => handleScheduleChange(emp.name, 'startDate', e.target.value)} 
+                                      <input
+                                          type="date"
+                                          value={currentSchedule.startDate || ''}
+                                          onChange={e => handleScheduleChange(emp.name, 'startDate', e.target.value)}
                                           className="w-full px-2 py-1 bg-white/40 border border-slate-300 rounded-md shadow-sm text-sm"
                                       />
                                   </div>
                                   <div>
                                       <label className="text-xs text-slate-600 block mb-1">Hasta</label>
-                                      <input 
-                                          type="date" 
-                                          value={currentSchedule.endDate || ''} 
-                                          onChange={e => handleScheduleChange(emp.name, 'endDate', e.target.value)} 
+                                      <input
+                                          type="date"
+                                          value={currentSchedule.endDate || ''}
+                                          onChange={e => handleScheduleChange(emp.name, 'endDate', e.target.value)}
                                           className="w-full px-2 py-1 bg-white/40 border border-slate-300 rounded-md shadow-sm text-sm"
                                       />
                                   </div>
@@ -639,6 +1131,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
             <div className="mt-6 border-t pt-6 border-slate-300/50">
               <h3 className="text-lg font-semibold text-slate-800 mb-4">Alta de Nuevo Colaborador</h3>
               <form onSubmit={handleRegisterEmployee} className="space-y-4">
+                {/* Email para acceso al sistema */}
+                <div className="p-4 bg-blue-50/50 border border-blue-200 rounded-lg">
+                  <label htmlFor="email" className="block text-sm font-medium text-blue-800">Email (para acceso al sistema)</label>
+                  <input type="email" name="email" id="email" value={newEmployee.email} onChange={handleNewEmployeeChange} required placeholder="colaborador@empresa.com" className="mt-1 block w-full px-3 py-2 bg-white border border-blue-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"/>
+                  <p className="mt-1 text-xs text-blue-600">La contraseña será el código de 6 dígitos generado automáticamente (fecha de nacimiento: DDMMAA)</p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label htmlFor="nombres" className="block text-sm font-medium text-slate-700">Nombre(s)</label>
@@ -757,7 +1256,23 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                   </div>
                 </div>
                 <div className="flex justify-end">
-                  <button type="submit" className="mt-2 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700">Registrar Colaborador</button>
+                  <button
+                    type="submit"
+                    disabled={isRegistering}
+                    className="mt-2 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isRegistering ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Registrando...
+                      </>
+                    ) : (
+                      'Registrar Colaborador'
+                    )}
+                  </button>
                 </div>
               </form>
 
@@ -777,23 +1292,103 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                     <table className="min-w-full bg-white/60 rounded-lg shadow">
                         <thead className="bg-white/80">
                             <tr>
+                                <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Acciones</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Código</th>
+                                <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Email</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Nombre Completo</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Puesto</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Departamento</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Horario L,M,M,V</th>
-                                <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Horario Jueves Caminata De Arte</th>
+                                <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Horario Jueves</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Horario Sáb</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Fecha Ingreso</th>
-                                <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Cumpleaños</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Antigüedad</th>
-                                <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">RFC</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200">
                             {detailedEmployees.length > 0 ? detailedEmployees.map(emp => (
                                 <tr key={emp.id} className="hover:bg-slate-100/50">
+                                    <td className="py-3 px-4 whitespace-nowrap text-sm">
+                                        <div className="flex space-x-2">
+                                            <button
+                                                onClick={() => handleEditEmployee(emp)}
+                                                className="text-blue-600 hover:text-blue-800 font-medium"
+                                                title="Editar"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                </svg>
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteEmployee(emp)}
+                                                className="text-red-600 hover:text-red-800 font-medium"
+                                                title="Dar de baja"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                </svg>
+                                            </button>
+                                            {/* Botón crear cuenta - solo si no tiene firebaseUid */}
+                                            {!emp.firebaseUid && (
+                                                <button
+                                                    onClick={() => handleCreateAccount(emp)}
+                                                    disabled={creatingAccountForId === emp.id}
+                                                    className={`font-medium ${
+                                                        emp.email
+                                                            ? 'text-green-600 hover:text-green-800'
+                                                            : 'text-slate-400 cursor-not-allowed'
+                                                    }`}
+                                                    title={emp.email ? 'Crear cuenta de acceso' : 'Agrega un email primero'}
+                                                >
+                                                    {creatingAccountForId === emp.id ? (
+                                                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                        </svg>
+                                                    ) : (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+                                            )}
+                                            {/* Indicador de cuenta activa y botón restablecer contraseña */}
+                                            {emp.firebaseUid && (
+                                                <>
+                                                    <span className="text-green-500" title="Cuenta activa">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                                        </svg>
+                                                    </span>
+                                                    <button
+                                                        onClick={() => handleResetPassword(emp)}
+                                                        disabled={resettingPasswordForId === emp.id}
+                                                        className="text-amber-600 hover:text-amber-800 font-medium"
+                                                        title="Restablecer contraseña"
+                                                    >
+                                                        {resettingPasswordForId === emp.id ? (
+                                                            <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                            </svg>
+                                                        ) : (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                                                            </svg>
+                                                        )}
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700 font-mono">{emp.codigo}</td>
+                                    <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">
+                                        {emp.email ? (
+                                            <span className="text-blue-600">{emp.email}</span>
+                                        ) : (
+                                            <span className="text-slate-400 italic">Sin email</span>
+                                        )}
+                                    </td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-800">{`${emp.nombres} ${emp.paterno} ${emp.materno}`}</td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{emp.puesto}</td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{emp.departamento}</td>
@@ -801,9 +1396,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{emp.horarioJueves}</td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{emp.horarioSabado}</td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700 font-mono">{emp.fechaIngreso}</td>
-                                    <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700 font-mono">{emp.fechaNacimiento}</td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{calculateTenure(emp.fechaIngreso)}</td>
-                                    <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700 font-mono">{emp.rfc}</td>
                                 </tr>
                             )) : (
                                 <tr>
@@ -818,6 +1411,143 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
           )}
         </div>
       </div>
+
+      {/* Modal de Edición */}
+      {isEditModalOpen && editingEmployee && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-slate-200">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-slate-800">Editar Colaborador</h3>
+                <button
+                  onClick={() => { setIsEditModalOpen(false); setEditingEmployee(null); }}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Email */}
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <label className="block text-sm font-medium text-blue-800 mb-1">Email (para acceso al sistema)</label>
+                <input
+                  type="email"
+                  name="email"
+                  value={editingEmployee.email || ''}
+                  onChange={handleEditFormChange}
+                  placeholder="colaborador@empresa.com"
+                  className="w-full px-3 py-2 bg-white border border-blue-300 rounded-md shadow-sm"
+                />
+                {!editingEmployee.firebaseUid && editingEmployee.email && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    Nota: Este colaborador no tiene cuenta de acceso. Para crearla, deberás registrarlo nuevamente.
+                  </p>
+                )}
+              </div>
+
+              {/* Datos personales */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Nombre(s)</label>
+                  <input type="text" name="nombres" value={editingEmployee.nombres} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Apellido Paterno</label>
+                  <input type="text" name="paterno" value={editingEmployee.paterno} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Apellido Materno</label>
+                  <input type="text" name="materno" value={editingEmployee.materno} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+              </div>
+
+              {/* Fechas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Fecha de Ingreso</label>
+                  <input type="date" name="fechaIngreso" value={editingEmployee.fechaIngreso} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Fecha de Cumpleaños</label>
+                  <input type="date" name="fechaNacimiento" value={editingEmployee.fechaNacimiento} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+              </div>
+
+              {/* Documentos */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">CURP</label>
+                  <input type="text" name="curp" value={editingEmployee.curp} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">RFC</label>
+                  <input type="text" name="rfc" value={editingEmployee.rfc} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">NSS</label>
+                  <input type="text" name="nss" value={editingEmployee.nss} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+              </div>
+
+              {/* Puesto y Departamento */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Departamento</label>
+                  <input type="text" name="departamento" value={editingEmployee.departamento} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Puesto</label>
+                  <input type="text" name="puesto" value={editingEmployee.puesto} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+              </div>
+
+              {/* Bonos */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Bono Puntualidad ($)</label>
+                  <input type="number" step="0.01" min="0" name="bonoPuntualidad" value={editingEmployee.bonoPuntualidad} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Bono Objetivos ($)</label>
+                  <input type="number" step="0.01" min="0" name="bonoObjetivos" value={editingEmployee.bonoObjetivos} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Apoyo Gasolina ($)</label>
+                  <input type="number" step="0.01" min="0" name="apoyoGasolina" value={editingEmployee.apoyoGasolina} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
+                </div>
+              </div>
+
+              {/* Info adicional */}
+              <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-600">
+                <p><strong>Código:</strong> {editingEmployee.codigo}</p>
+                {editingEmployee.firebaseUid && (
+                  <p className="text-green-600 mt-1">Este colaborador tiene cuenta de acceso activa.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex justify-end space-x-3">
+              <button
+                onClick={() => { setIsEditModalOpen(false); setEditingEmployee(null); }}
+                className="px-4 py-2 text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={isSavingEdit}
+                className="px-4 py-2 text-white bg-gradient-to-r from-amber-600 to-orange-600 rounded-md hover:from-amber-700 hover:to-orange-700 disabled:opacity-50"
+              >
+                {isSavingEdit ? 'Guardando...' : 'Guardar Cambios'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
