@@ -9,6 +9,7 @@ import { DownloadIcon } from './icons/DownloadIcon';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMethodsForEmail } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../../src/firebaseConfig';
+import { employeesService, logsService, permissionsService, schedulesService, migrateAllDataToFirestore } from '../../src/services/firestoreService';
 
 interface AdminViewProps {
   onExit: () => void;
@@ -167,45 +168,51 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const [endDate, setEndDate] = useState(today);
 
   useEffect(() => {
-    // Cargar todos los registros
-    const storedLogs = localStorage.getItem('all_employee_logs');
-    if (storedLogs) {
-      setAllLogs(JSON.parse(storedLogs));
-    }
+    // Migrar datos existentes de localStorage a Firestore (solo la primera vez)
+    migrateAllDataToFirestore();
 
-    // Cargar horarios con migración de datos viejos
-    const storedSchedules = localStorage.getItem('employee_schedules');
-    if (storedSchedules) {
-        const parsedSchedules = JSON.parse(storedSchedules);
-        const migratedSchedules: { [key: string]: ScheduleConfig } = {};
-        for (const empName in parsedSchedules) {
-            const value = parsedSchedules[empName];
-            if (typeof value === 'string') {
-                migratedSchedules[empName] = { type: 'indeterminado', time: value };
-            } else if (typeof value === 'object' && value.time) {
-                migratedSchedules[empName] = value;
-            }
+    // Suscribirse a cambios en tiempo real desde Firestore
+    const unsubscribeLogs = logsService.subscribe((logs) => {
+      setAllLogs(logs);
+    });
+
+    const unsubscribeEmployees = employeesService.subscribe((employees) => {
+      setDetailedEmployees(employees);
+    });
+
+    const unsubscribePermissions = permissionsService.subscribe((requests) => {
+      setPermissionRequests(requests);
+    });
+
+    const unsubscribeSchedules = schedulesService.subscribe((loadedSchedules) => {
+      const migratedSchedules: { [key: string]: ScheduleConfig } = {};
+      for (const empName in loadedSchedules) {
+        const value = loadedSchedules[empName];
+        if (typeof value === 'string') {
+          migratedSchedules[empName] = { type: 'indeterminado', time: value };
+        } else if (typeof value === 'object' && value.time) {
+          migratedSchedules[empName] = value;
         }
+      }
+      if (Object.keys(migratedSchedules).length > 0) {
         setSchedules(migratedSchedules);
-    } else {
+      } else {
+        // Default schedules si no hay datos
         const defaultSchedules = EMPLOYEES.reduce((acc, emp) => {
-            acc[emp.name] = { type: 'indeterminado', time: emp.scheduleStartTime };
-            return acc;
+          acc[emp.name] = { type: 'indeterminado', time: emp.scheduleStartTime };
+          return acc;
         }, {} as {[key: string]: ScheduleConfig});
         setSchedules(defaultSchedules);
-    }
+      }
+    });
 
-    // Cargar empleados detallados
-    const storedEmployeesStr = localStorage.getItem('detailed_employees');
-    if (storedEmployeesStr) {
-        setDetailedEmployees(JSON.parse(storedEmployeesStr));
-    }
-    
-    // Cargar solicitudes de permiso
-    const storedPermissions = localStorage.getItem('permission_requests');
-    if (storedPermissions) {
-        setPermissionRequests(JSON.parse(storedPermissions));
-    }
+    // Cleanup: desuscribirse cuando el componente se desmonte
+    return () => {
+      unsubscribeLogs();
+      unsubscribeEmployees();
+      unsubscribePermissions();
+      unsubscribeSchedules();
+    };
   }, []);
 
   const calculatedOwedHours = useMemo(() => {
@@ -347,9 +354,14 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     });
   };
 
-  const saveSchedules = () => {
-    localStorage.setItem('employee_schedules', JSON.stringify(schedules));
-    alert('Horarios guardados.');
+  const saveSchedules = async () => {
+    try {
+      await schedulesService.save(schedules);
+      alert('Horarios guardados.');
+    } catch (error) {
+      console.error('Error al guardar horarios:', error);
+      alert('Error al guardar horarios. Intenta de nuevo.');
+    }
   };
 
   const [isRegistering, setIsRegistering] = useState(false);
@@ -371,8 +383,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     setIsRegistering(true);
 
     try {
-      const storedEmployeesStr = localStorage.getItem('detailed_employees');
-      const existingEmployees: DetailedEmployee[] = storedEmployeesStr ? JSON.parse(storedEmployeesStr) : [];
+      // Obtener empleados existentes desde Firestore
+      const existingEmployees = await employeesService.getAll();
 
       // Verificar si el email ya existe en detailed_employees
       if (existingEmployees.some(emp => emp.email === newEmployee.email)) {
@@ -451,8 +463,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
           ? `${scheduleForm.sabEntrada} - ${scheduleForm.sabSalida}`
           : 'No labora';
 
-      const newEmployeeRecord: DetailedEmployee = {
-        id: Date.now().toString(),
+      const newEmployeeData = {
         codigo: employeeCode,
         email: newEmployee.email,
         firebaseUid: firebaseUid,
@@ -474,10 +485,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         apoyoGasolina: Number(newEmployee.apoyoGasolina),
       };
 
-      const updatedEmployees = [...existingEmployees, newEmployeeRecord];
-      localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
-
-      setDetailedEmployees(updatedEmployees);
+      // Guardar en Firestore (el servicio también actualiza localStorage)
+      await employeesService.create(newEmployeeData);
+      // La suscripción actualizará automáticamente detailedEmployees
 
       // Mostrar mensaje según el caso
       if (accountLinked) {
@@ -524,9 +534,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
         if (confirmLink) {
           try {
-            // Obtener empleados existentes
-            const storedEmployeesStr = localStorage.getItem('detailed_employees');
-            const existingEmployees: DetailedEmployee[] = storedEmployeesStr ? JSON.parse(storedEmployeesStr) : [];
+            // Obtener empleados existentes desde Firestore
+            const existingEmployees = await employeesService.getAll();
 
             // Generar código
             const [year, month, day] = newEmployee.fechaNacimiento.split('-');
@@ -557,8 +566,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
               : 'No labora';
 
             // Crear registro del empleado SIN crear cuenta en Firebase Auth
-            const newEmployeeRecord: DetailedEmployee = {
-              id: Date.now().toString(),
+            const newEmployeeData = {
               codigo: employeeCode,
               email: newEmployee.email,
               firebaseUid: firebaseUid,
@@ -580,9 +588,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
               apoyoGasolina: Number(newEmployee.apoyoGasolina),
             };
 
-            const updatedEmployees = [...existingEmployees, newEmployeeRecord];
-            localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
-            setDetailedEmployees(updatedEmployees);
+            // Guardar en Firestore
+            await employeesService.create(newEmployeeData);
 
             alert(
               `Colaborador registrado y vinculado exitosamente!\n\n` +
@@ -622,14 +629,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
     setIsSavingEdit(true);
     try {
-      const updatedEmployees = detailedEmployees.map(emp =>
-        emp.id === editingEmployee.id ? editingEmployee : emp
-      );
+      // Actualizar en Firestore
+      await employeesService.update(editingEmployee.id, editingEmployee);
 
-      localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
-      setDetailedEmployees(updatedEmployees);
-
-      // Si el colaborador tiene cuenta Firebase, actualizar en Firestore
+      // Si el colaborador tiene cuenta Firebase, actualizar en Firestore users
       if (editingEmployee.firebaseUid) {
         await setDoc(doc(db, 'users', editingEmployee.firebaseUid), {
           displayName: `${editingEmployee.nombres} ${editingEmployee.paterno}`,
@@ -658,9 +661,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     if (!confirmDelete) return;
 
     try {
-      const updatedEmployees = detailedEmployees.filter(emp => emp.id !== employee.id);
-      localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
-      setDetailedEmployees(updatedEmployees);
+      // Eliminar de Firestore
+      await employeesService.delete(employee.id);
 
       // Nota: No eliminamos la cuenta de Firebase Auth por seguridad
       // El admin puede desactivarla desde la consola de Firebase si es necesario
@@ -688,18 +690,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         const existingUser = querySnapshot.docs[0];
         const uid = existingUser.id;
 
-        // Actualizar el registro del empleado con el firebaseUid
-        const updatedEmployee: DetailedEmployee = {
-          ...employee,
-          firebaseUid: uid,
-        };
-
-        const updatedEmployees = detailedEmployees.map(emp =>
-          emp.id === employee.id ? updatedEmployee : emp
-        );
-
-        localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
-        setDetailedEmployees(updatedEmployees);
+        // Actualizar el registro del empleado con el firebaseUid en Firestore
+        await employeesService.update(employee.id, { firebaseUid: uid });
 
         alert(
           `Cuenta vinculada exitosamente!\n\n` +
@@ -788,18 +780,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         createdAt: new Date(),
       });
 
-      // Actualizar el registro del empleado con el firebaseUid
-      const updatedEmployee: DetailedEmployee = {
-        ...employee,
-        firebaseUid: userCredential.user.uid,
-      };
-
-      const updatedEmployees = detailedEmployees.map(emp =>
-        emp.id === employee.id ? updatedEmployee : emp
-      );
-
-      localStorage.setItem('detailed_employees', JSON.stringify(updatedEmployees));
-      setDetailedEmployees(updatedEmployees);
+      // Actualizar el registro del empleado con el firebaseUid en Firestore
+      await employeesService.update(employee.id, { firebaseUid: userCredential.user.uid });
 
       alert(
         `Cuenta creada exitosamente!\n\n` +

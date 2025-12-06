@@ -12,6 +12,7 @@ import type { Employee, LogEntry, Location, IncomeEntry, DetailedEmployee } from
 import { ClockStatus, LogType } from '../../types';
 import { EMPLOYEES } from '../../checadorConstants';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { logsService } from '../../src/services/firestoreService';
 
 export const ChecadorPage: React.FC = () => {
     const { user, userData, isAdmin } = useAuth();
@@ -219,7 +220,7 @@ export const ChecadorPage: React.FC = () => {
         );
     };
 
-    const saveLog = (type: LogType, location?: Location) => {
+    const saveLog = async (type: LogType, location?: Location) => {
         if (!authenticatedEmployee) return;
 
         const newLog: LogEntry = {
@@ -229,19 +230,21 @@ export const ChecadorPage: React.FC = () => {
             location,
         };
 
-        // Guardar en log diario
-        const key = getTodayKey(authenticatedEmployee.name);
-        const updatedLogs = [...dailyLogs, newLog];
-        localStorage.setItem(key, JSON.stringify(updatedLogs));
-        
-        // Guardar en log global
-        const allLogsStr = localStorage.getItem('all_employee_logs');
-        const allLogs = allLogsStr ? JSON.parse(allLogsStr) : [];
-        allLogs.push(newLog);
-        localStorage.setItem('all_employee_logs', JSON.stringify(allLogs));
+        try {
+            // Guardar en Firestore (también actualiza localStorage como backup)
+            await logsService.create(newLog);
 
-        setDailyLogs(updatedLogs);
-        loadDailyLogs(authenticatedEmployee); // Recargar para actualizar status
+            // Guardar en log diario (localStorage para vista rápida)
+            const key = getTodayKey(authenticatedEmployee.name);
+            const updatedLogs = [...dailyLogs, newLog];
+            localStorage.setItem(key, JSON.stringify(updatedLogs));
+
+            setDailyLogs(updatedLogs);
+            loadDailyLogs(authenticatedEmployee); // Recargar para actualizar status
+        } catch (error) {
+            console.error('Error al guardar registro:', error);
+            alert('Error al guardar registro. Intenta de nuevo.');
+        }
     };
 
     const handleSaveIncome = (data: Omit<IncomeEntry, 'id' | 'employeeName' | 'notes'>) => {
