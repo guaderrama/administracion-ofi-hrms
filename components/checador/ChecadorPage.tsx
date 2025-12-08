@@ -12,7 +12,7 @@ import type { Employee, LogEntry, Location, IncomeEntry, DetailedEmployee } from
 import { ClockStatus, LogType } from '../../types';
 import { EMPLOYEES } from '../../checadorConstants';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { logsService } from '../../src/services/firestoreService';
+import { logsService, employeesService } from '../../src/services/firestoreService';
 
 export const ChecadorPage: React.FC = () => {
     const { user, userData, isAdmin } = useAuth();
@@ -22,38 +22,38 @@ export const ChecadorPage: React.FC = () => {
     const [clockStatus, setClockStatus] = useState<ClockStatus>(ClockStatus.OUT_OF_OFFICE);
     const [owedHours, setOwedHours] = useState<number>(0);
     const [incomes, setIncomes] = useState<IncomeEntry[]>([]);
+    const [detailedEmployees, setDetailedEmployees] = useState<DetailedEmployee[]>([]);
+
+    // Cargar empleados desde Firestore
+    useEffect(() => {
+        const unsubscribe = employeesService.subscribe((employees) => {
+            setDetailedEmployees(employees);
+        });
+        return () => unsubscribe();
+    }, []);
 
     // Función para obtener el PIN correcto de detailed_employees o EMPLOYEES
     const getEmployeePin = useCallback((employeeName: string): string => {
-        const storedEmployeesStr = localStorage.getItem('detailed_employees');
-        if (storedEmployeesStr) {
-            const detailedEmployees: DetailedEmployee[] = JSON.parse(storedEmployeesStr);
-            // Buscar por nombre similar
-            const matchingDetailedEmp = detailedEmployees.find(emp => {
-                const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
-                const empNameNormalized = employeeName.toUpperCase().trim();
-                return empNameNormalized === fullName ||
-                       (empNameNormalized.includes(emp.paterno.toUpperCase()) &&
-                        empNameNormalized.includes(emp.nombres.toUpperCase()));
-            });
-            if (matchingDetailedEmp && matchingDetailedEmp.codigo) {
-                return matchingDetailedEmp.codigo;
-            }
+        // Buscar en detailedEmployees (Firestore)
+        const matchingDetailedEmp = detailedEmployees.find(emp => {
+            const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
+            const empNameNormalized = employeeName.toUpperCase().trim();
+            return empNameNormalized === fullName ||
+                   (empNameNormalized.includes(emp.paterno.toUpperCase()) &&
+                    empNameNormalized.includes(emp.nombres.toUpperCase()));
+        });
+        if (matchingDetailedEmp && matchingDetailedEmp.codigo) {
+            return matchingDetailedEmp.codigo;
         }
         // Fallback al PIN de EMPLOYEES
         const empFromConstants = EMPLOYEES.find(e => e.name === employeeName);
         return empFromConstants?.pin || '';
-    }, []);
+    }, [detailedEmployees]);
 
-    // Generar lista de empleados con PINs sincronizados desde detailed_employees
+    // Generar lista de empleados combinando EMPLOYEES constante + detailedEmployees de Firestore
     const syncedEmployees = useMemo((): Employee[] => {
-        const storedEmployeesStr = localStorage.getItem('detailed_employees');
-        if (!storedEmployeesStr) return EMPLOYEES;
-
-        const detailedEmployees: DetailedEmployee[] = JSON.parse(storedEmployeesStr);
-
-        // Actualizar PINs de EMPLOYEES con los códigos de detailed_employees
-        return EMPLOYEES.map(emp => {
+        // Crear lista base desde EMPLOYEES
+        const baseEmployees = EMPLOYEES.map(emp => {
             const matchingDetailedEmp = detailedEmployees.find(detEmp => {
                 const fullName = `${detEmp.paterno} ${detEmp.materno} ${detEmp.nombres}`.toUpperCase().trim();
                 const empNameNormalized = emp.name.toUpperCase().trim();
@@ -67,53 +67,79 @@ export const ChecadorPage: React.FC = () => {
             }
             return emp;
         });
-    }, []);
+
+        // Agregar empleados de Firestore que no están en EMPLOYEES
+        const additionalEmployees: Employee[] = detailedEmployees
+            .filter(detEmp => {
+                const fullName = `${detEmp.paterno} ${detEmp.materno} ${detEmp.nombres}`.toUpperCase().trim();
+                return !baseEmployees.some(emp =>
+                    emp.name.toUpperCase().trim() === fullName ||
+                    (emp.name.toUpperCase().includes(detEmp.paterno.toUpperCase()) &&
+                     emp.name.toUpperCase().includes(detEmp.nombres.toUpperCase()))
+                );
+            })
+            .map(detEmp => ({
+                name: `${detEmp.paterno} ${detEmp.materno} ${detEmp.nombres}`.toUpperCase(),
+                pin: detEmp.codigo || '',
+                scheduleStartTime: '09:00',
+                birthDate: detEmp.fechaNacimiento || '',
+                hireDate: detEmp.fechaIngreso || ''
+            }));
+
+        return [...baseEmployees, ...additionalEmployees];
+    }, [detailedEmployees]);
 
     // Filtrar empleados según el usuario autenticado
     // Admin ve todos, empleado solo ve su propio nombre
     const filteredEmployees = useMemo(() => {
-        // Si es admin, mostrar todos los empleados (con PINs sincronizados)
+        // Si es admin, mostrar todos los empleados
         if (isAdmin) {
             return syncedEmployees;
         }
 
         // Si es empleado, buscar su registro en detailed_employees por email
         const userEmail = user?.email;
-        if (!userEmail) return syncedEmployees; // Fallback si no hay email
+        if (!userEmail) return []; // Si no hay email, no mostrar empleados
 
-        // Buscar en detailed_employees (localStorage) para encontrar el nombre del empleado
-        const storedEmployeesStr = localStorage.getItem('detailed_employees');
-        if (storedEmployeesStr) {
-            const detailedEmployees: DetailedEmployee[] = JSON.parse(storedEmployeesStr);
-            const matchingEmployee = detailedEmployees.find(
-                emp => emp.email?.toLowerCase() === userEmail.toLowerCase()
-            );
+        // Buscar en detailedEmployees (Firestore) por email
+        const matchingEmployee = detailedEmployees.find(
+            emp => emp.email?.toLowerCase() === userEmail.toLowerCase()
+        );
 
-            if (matchingEmployee) {
-                // Buscar en syncedEmployees por nombre similar
-                const fullName = `${matchingEmployee.paterno} ${matchingEmployee.materno} ${matchingEmployee.nombres}`.toUpperCase();
-                const matchingChecadorEmployee = syncedEmployees.find(emp => {
-                    // Comparar nombres normalizados
-                    const empNameNormalized = emp.name.toUpperCase().trim();
-                    const fullNameNormalized = fullName.trim();
-                    return empNameNormalized === fullNameNormalized ||
-                           (empNameNormalized.includes(matchingEmployee.paterno.toUpperCase()) &&
-                           empNameNormalized.includes(matchingEmployee.nombres.toUpperCase()));
-                });
+        if (matchingEmployee) {
+            // Construir nombre completo del empleado
+            const fullName = `${matchingEmployee.paterno} ${matchingEmployee.materno} ${matchingEmployee.nombres}`.toUpperCase();
 
-                if (matchingChecadorEmployee) {
-                    // Usar el código de detailed_employees
-                    return [{
-                        ...matchingChecadorEmployee,
-                        pin: matchingEmployee.codigo || matchingChecadorEmployee.pin
-                    }];
-                }
+            // Buscar en syncedEmployees por nombre similar
+            const matchingChecadorEmployee = syncedEmployees.find(emp => {
+                const empNameNormalized = emp.name.toUpperCase().trim();
+                const fullNameNormalized = fullName.trim();
+                return empNameNormalized === fullNameNormalized ||
+                       (empNameNormalized.includes(matchingEmployee.paterno.toUpperCase()) &&
+                        empNameNormalized.includes(matchingEmployee.nombres.toUpperCase()));
+            });
+
+            if (matchingChecadorEmployee) {
+                // Retornar solo el empleado que coincide con el email del usuario
+                return [{
+                    ...matchingChecadorEmployee,
+                    pin: matchingEmployee.codigo || matchingChecadorEmployee.pin
+                }];
             }
+
+            // Si no está en syncedEmployees, crear uno nuevo
+            return [{
+                name: fullName,
+                pin: matchingEmployee.codigo || '',
+                scheduleStartTime: '09:00',
+                birthDate: matchingEmployee.fechaNacimiento || '',
+                hireDate: matchingEmployee.fechaIngreso || ''
+            }];
         }
 
-        // Si no se encuentra coincidencia, mostrar todos (fallback para admins o usuarios no encontrados)
-        return syncedEmployees;
-    }, [user, isAdmin, syncedEmployees]);
+        // Si no se encuentra el empleado por email, retornar lista vacía
+        return [];
+    }, [user, isAdmin, syncedEmployees, detailedEmployees]);
 
     const getTodayKey = (employeeName: string) => {
         const today = new Date().toISOString().slice(0, 10);

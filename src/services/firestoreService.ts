@@ -251,17 +251,41 @@ export const logsService = {
     return unsubscribe;
   },
 
-  // Sincronizar localStorage con Firestore
+  // Sincronizar localStorage con Firestore (solo una vez)
   async syncFromLocalStorage(): Promise<void> {
     try {
+      // Verificar si ya se sincronizó anteriormente
+      const alreadySynced = localStorage.getItem('logs_synced_to_firestore');
+      if (alreadySynced === 'true') {
+        console.log('Logs ya fueron sincronizados previamente');
+        return;
+      }
+
       const stored = localStorage.getItem('all_employee_logs');
       if (!stored) return;
 
       const localLogs: LogEntry[] = JSON.parse(stored);
+      if (localLogs.length === 0) return;
+
+      // Obtener logs existentes en Firestore para evitar duplicados
+      const existingLogs = await getDocs(collection(db, LOGS_COLLECTION));
+      const existingTimestamps = new Set(
+        existingLogs.docs.map(doc => doc.data().timestamp)
+      );
+
+      // Filtrar solo logs que no existen en Firestore
+      const newLogs = localLogs.filter(log => !existingTimestamps.has(log.timestamp));
+
+      if (newLogs.length === 0) {
+        console.log('No hay logs nuevos para sincronizar');
+        localStorage.setItem('logs_synced_to_firestore', 'true');
+        return;
+      }
+
       const batch = writeBatch(db);
       let count = 0;
 
-      for (const log of localLogs) {
+      for (const log of newLogs) {
         const docRef = doc(collection(db, LOGS_COLLECTION));
         batch.set(docRef, {
           ...log,
@@ -279,7 +303,10 @@ export const logsService = {
       if (count > 0) {
         await batch.commit();
       }
-      console.log('Logs sincronizados con Firestore');
+
+      // Marcar como sincronizado para no repetir
+      localStorage.setItem('logs_synced_to_firestore', 'true');
+      console.log(`${newLogs.length} logs sincronizados con Firestore`);
     } catch (error) {
       console.error('Error al sincronizar logs:', error);
     }
@@ -485,5 +512,77 @@ export const migrateAllDataToFirestore = async (): Promise<void> => {
     console.log('Migración completada exitosamente');
   } catch (error) {
     console.error('Error durante la migración:', error);
+  }
+};
+
+// ============================================
+// FUNCIÓN PARA LIMPIAR DUPLICADOS
+// ============================================
+
+export const cleanDuplicateLogs = async (): Promise<{ deleted: number; found: number }> => {
+  console.log('🔍 Buscando registros duplicados en attendance_logs...');
+
+  try {
+    const snapshot = await getDocs(collection(db, LOGS_COLLECTION));
+
+    // Crear mapa de logs por timestamp + employeeName + type
+    const logsMap = new Map<string, { id: string; data: any }[]>();
+
+    snapshot.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      const key = `${data.timestamp}_${data.employeeName}_${data.type}`;
+
+      if (!logsMap.has(key)) {
+        logsMap.set(key, []);
+      }
+      logsMap.get(key)!.push({
+        id: docSnap.id,
+        data
+      });
+    });
+
+    // Encontrar duplicados
+    const duplicateIds: string[] = [];
+
+    logsMap.forEach((docs, key) => {
+      if (docs.length > 1) {
+        console.log(`📋 Duplicado: ${key} (${docs.length} registros)`);
+        // Mantener el primero, eliminar el resto
+        for (let i = 1; i < docs.length; i++) {
+          duplicateIds.push(docs[i].id);
+        }
+      }
+    });
+
+    if (duplicateIds.length === 0) {
+      console.log('✅ No se encontraron registros duplicados.');
+      return { deleted: 0, found: 0 };
+    }
+
+    console.log(`🗑️ Eliminando ${duplicateIds.length} registros duplicados...`);
+
+    // Eliminar en batches
+    const batchSize = 450;
+    let deleted = 0;
+
+    for (let i = 0; i < duplicateIds.length; i += batchSize) {
+      const batch = writeBatch(db);
+      const chunk = duplicateIds.slice(i, i + batchSize);
+
+      chunk.forEach(docId => {
+        batch.delete(doc(db, LOGS_COLLECTION, docId));
+      });
+
+      await batch.commit();
+      deleted += chunk.length;
+      console.log(`   Eliminados: ${deleted}/${duplicateIds.length}`);
+    }
+
+    console.log(`✅ Limpieza completada. ${deleted} registros duplicados eliminados.`);
+    return { deleted, found: duplicateIds.length };
+
+  } catch (error) {
+    console.error('❌ Error al limpiar duplicados:', error);
+    throw error;
   }
 };

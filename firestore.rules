@@ -23,25 +23,45 @@ service cloud.firestore {
       allow update, delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
 
-    // Attendance collection
-    match /attendance/{docId} {
-      allow read: if isAuthenticated() &&
-        (resource.data.employeeId == request.auth.uid || isAdmin());
+    // Detailed Employees collection (datos de colaboradores)
+    match /detailed_employees/{employeeId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Attendance Logs collection (registros de asistencia)
+    match /attendance_logs/{logId} {
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       allow update, delete: if isAdmin();
     }
 
-    // Requests collection (permisos, vacaciones, préstamos)
-    match /requests/{requestId} {
-      allow read: if isAuthenticated() &&
-        (resource.data.employeeId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() &&
-        request.resource.data.employeeId == request.auth.uid;
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+    // Permission Requests collection (solicitudes de permisos)
+    match /permission_requests/{requestId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
     }
 
-    // Employees collection (datos detallados)
+    // Employee Schedules collection (horarios)
+    match /employee_schedules/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Legacy collections (mantener por compatibilidad)
+    match /attendance/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    match /requests/{requestId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
     match /employees/{employeeId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();

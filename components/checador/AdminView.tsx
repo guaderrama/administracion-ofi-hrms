@@ -9,7 +9,7 @@ import { DownloadIcon } from './icons/DownloadIcon';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMethodsForEmail } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../../src/firebaseConfig';
-import { employeesService, logsService, permissionsService, schedulesService, migrateAllDataToFirestore } from '../../src/services/firestoreService';
+import { employeesService, logsService, permissionsService, schedulesService, migrateAllDataToFirestore, cleanDuplicateLogs } from '../../src/services/firestoreService';
 
 interface AdminViewProps {
   onExit: () => void;
@@ -166,6 +166,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const today = new Date().toISOString().slice(0, 10);
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
 
   useEffect(() => {
     // Migrar datos existentes de localStorage a Firestore (solo la primera vez)
@@ -361,6 +362,29 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     } catch (error) {
       console.error('Error al guardar horarios:', error);
       alert('Error al guardar horarios. Intenta de nuevo.');
+    }
+  };
+
+  const handleCleanDuplicates = async () => {
+    const confirm = window.confirm(
+      '¿Estás seguro de que deseas limpiar los registros duplicados?\n\n' +
+      'Esta acción eliminará los registros de asistencia duplicados en la base de datos.'
+    );
+    if (!confirm) return;
+
+    setIsCleaningDuplicates(true);
+    try {
+      const result = await cleanDuplicateLogs();
+      if (result.deleted > 0) {
+        alert(`Limpieza completada.\n\n${result.deleted} registros duplicados eliminados.`);
+      } else {
+        alert('No se encontraron registros duplicados.');
+      }
+    } catch (error) {
+      console.error('Error al limpiar duplicados:', error);
+      alert('Error al limpiar duplicados. Revisa la consola para más detalles.');
+    } finally {
+      setIsCleaningDuplicates(false);
     }
   };
 
@@ -935,14 +959,23 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold text-slate-800">Registros de Asistencia</h2>
-            <button
-              onClick={handleDownloadLogs}
-              disabled={filteredLogs.length === 0}
-              className="inline-flex items-center px-3 py-1 border border-slate-300 text-sm font-medium rounded-md shadow-sm text-slate-700 bg-white/60 hover:bg-white/80 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 disabled:bg-slate-100/50 disabled:cursor-not-allowed disabled:text-slate-400"
-            >
-              <DownloadIcon />
-              <span className="ml-2">Descargar CSV</span>
-            </button>
+            <div className="flex space-x-2">
+              <button
+                onClick={handleCleanDuplicates}
+                disabled={isCleaningDuplicates}
+                className="inline-flex items-center px-3 py-1 border border-red-300 text-sm font-medium rounded-md shadow-sm text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:bg-slate-100/50 disabled:cursor-not-allowed disabled:text-slate-400"
+              >
+                {isCleaningDuplicates ? 'Limpiando...' : 'Limpiar Duplicados'}
+              </button>
+              <button
+                onClick={handleDownloadLogs}
+                disabled={filteredLogs.length === 0}
+                className="inline-flex items-center px-3 py-1 border border-slate-300 text-sm font-medium rounded-md shadow-sm text-slate-700 bg-white/60 hover:bg-white/80 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 disabled:bg-slate-100/50 disabled:cursor-not-allowed disabled:text-slate-400"
+              >
+                <DownloadIcon />
+                <span className="ml-2">Descargar CSV</span>
+              </button>
+            </div>
           </div>
           <div className="flex items-center space-x-4 mb-4">
             <div>
