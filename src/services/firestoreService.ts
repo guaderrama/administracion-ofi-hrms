@@ -19,7 +19,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import type { DetailedEmployee, LogEntry, PermissionRequest } from '../../types';
+import type { DetailedEmployee, LogEntry, PermissionRequest, IncomeEntry } from '../../types';
 
 // ============================================
 // EMPLEADOS (detailed_employees)
@@ -542,6 +542,187 @@ export const schedulesService = {
       }
     );
     return unsubscribe;
+  },
+};
+
+// ============================================
+// INGRESOS (incomes)
+// ============================================
+
+const INCOMES_COLLECTION = 'incomes';
+
+export const incomesService = {
+  // Obtener todos los ingresos
+  async getAll(): Promise<IncomeEntry[]> {
+    try {
+      const querySnapshot = await getDocs(
+        query(collection(db, INCOMES_COLLECTION), orderBy('paymentDate', 'desc'))
+      );
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id,
+      })) as IncomeEntry[];
+    } catch (error) {
+      console.error('Error al obtener ingresos:', error);
+      return [];
+    }
+  },
+
+  // Obtener ingresos por empleado
+  async getByEmployee(employeeName: string): Promise<IncomeEntry[]> {
+    try {
+      const querySnapshot = await getDocs(
+        query(
+          collection(db, INCOMES_COLLECTION),
+          where('employeeName', '==', employeeName),
+          orderBy('paymentDate', 'desc')
+        )
+      );
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id,
+      })) as IncomeEntry[];
+    } catch (error) {
+      console.error('Error al obtener ingresos por empleado:', error);
+      // Fallback a localStorage
+      const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
+      const stored = localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : [];
+    }
+  },
+
+  // Crear nuevo ingreso
+  async create(income: Omit<IncomeEntry, 'id'>): Promise<IncomeEntry> {
+    try {
+      const docRef = await addDoc(collection(db, INCOMES_COLLECTION), {
+        ...income,
+        createdAt: Timestamp.now(),
+      });
+      const newIncome = { ...income, id: docRef.id };
+
+      // También guardar en localStorage como backup
+      const key = `incomes_${income.employeeName.replace(/\s+/g, '_')}`;
+      const stored = localStorage.getItem(key);
+      const incomes = stored ? JSON.parse(stored) : [];
+      incomes.push(newIncome);
+      localStorage.setItem(key, JSON.stringify(incomes));
+
+      return newIncome as IncomeEntry;
+    } catch (error) {
+      console.error('Error al crear ingreso:', error);
+      throw error;
+    }
+  },
+
+  // Actualizar ingreso existente
+  async update(incomeId: string, data: Partial<IncomeEntry>): Promise<void> {
+    try {
+      const docRef = doc(db, INCOMES_COLLECTION, incomeId);
+      const { id, ...updateData } = data as IncomeEntry;
+      await updateDoc(docRef, {
+        ...updateData,
+        updatedAt: Timestamp.now(),
+      });
+
+      // Actualizar localStorage
+      if (data.employeeName) {
+        const key = `incomes_${data.employeeName.replace(/\s+/g, '_')}`;
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const incomes = JSON.parse(stored);
+          const index = incomes.findIndex((i: IncomeEntry) => i.id === incomeId);
+          if (index !== -1) {
+            incomes[index] = { ...incomes[index], ...updateData };
+            localStorage.setItem(key, JSON.stringify(incomes));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error al actualizar ingreso:', error);
+      throw error;
+    }
+  },
+
+  // Eliminar ingreso
+  async delete(incomeId: string, employeeName: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, INCOMES_COLLECTION, incomeId));
+
+      // Eliminar de localStorage
+      const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const incomes = JSON.parse(stored);
+        const filtered = incomes.filter((i: IncomeEntry) => i.id !== incomeId);
+        localStorage.setItem(key, JSON.stringify(filtered));
+      }
+    } catch (error) {
+      console.error('Error al eliminar ingreso:', error);
+      throw error;
+    }
+  },
+
+  // Suscribirse a cambios en tiempo real por empleado
+  subscribe(employeeName: string, callback: (incomes: IncomeEntry[]) => void): () => void {
+    const unsubscribe = onSnapshot(
+      query(
+        collection(db, INCOMES_COLLECTION),
+        where('employeeName', '==', employeeName),
+        orderBy('paymentDate', 'desc')
+      ),
+      (snapshot) => {
+        const incomes = snapshot.docs.map(doc => ({
+          ...doc.data(),
+          id: doc.id,
+        })) as IncomeEntry[];
+
+        // Actualizar localStorage
+        const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
+        localStorage.setItem(key, JSON.stringify(incomes));
+        callback(incomes);
+      },
+      (error) => {
+        console.error('Error en suscripción de ingresos:', error);
+      }
+    );
+    return unsubscribe;
+  },
+
+  // Migrar ingresos de localStorage a Firestore
+  async syncFromLocalStorage(employeeName: string): Promise<void> {
+    try {
+      const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
+      const stored = localStorage.getItem(key);
+      if (!stored) return;
+
+      const localIncomes: IncomeEntry[] = JSON.parse(stored);
+      if (localIncomes.length === 0) return;
+
+      // Verificar qué ingresos ya existen en Firestore
+      const existingIncomes = await this.getByEmployee(employeeName);
+      const existingIds = new Set(existingIncomes.map(i => i.id));
+
+      const batch = writeBatch(db);
+      let count = 0;
+
+      for (const income of localIncomes) {
+        if (!existingIds.has(income.id)) {
+          const docRef = doc(collection(db, INCOMES_COLLECTION));
+          batch.set(docRef, {
+            ...income,
+            syncedAt: Timestamp.now(),
+          });
+          count++;
+        }
+      }
+
+      if (count > 0) {
+        await batch.commit();
+        console.log(`${count} ingresos de ${employeeName} sincronizados con Firestore`);
+      }
+    } catch (error) {
+      console.error('Error al sincronizar ingresos:', error);
+    }
   },
 };
 

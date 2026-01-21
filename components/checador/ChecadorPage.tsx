@@ -12,7 +12,8 @@ import type { Employee, LogEntry, Location, IncomeEntry, DetailedEmployee } from
 import { ClockStatus, LogType } from '../../types';
 import { EMPLOYEES } from '../../checadorConstants';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { logsService, employeesService } from '../../src/services/firestoreService';
+import { logsService, employeesService, incomesService } from '../../src/services/firestoreService';
+import { PaymentConcept } from '../../types';
 
 export const ChecadorPage: React.FC = () => {
     const { user, userData, isAdmin } = useAuth();
@@ -23,6 +24,11 @@ export const ChecadorPage: React.FC = () => {
     const [owedHours, setOwedHours] = useState<number>(0);
     const [incomes, setIncomes] = useState<IncomeEntry[]>([]);
     const [detailedEmployees, setDetailedEmployees] = useState<DetailedEmployee[]>([]);
+
+    // Estados para edición de ingresos (solo admin)
+    const [editingIncome, setEditingIncome] = useState<IncomeEntry | null>(null);
+    const [isIncomeEditModalOpen, setIsIncomeEditModalOpen] = useState(false);
+    const [isSavingIncome, setIsSavingIncome] = useState(false);
 
     // Cargar empleados desde Firestore
     useEffect(() => {
@@ -177,11 +183,21 @@ export const ChecadorPage: React.FC = () => {
         }
     }, []);
     
-    const loadIncomes = useCallback((employee: Employee) => {
-        const key = getIncomesKey(employee.name);
-        const storedIncomes = localStorage.getItem(key);
-        const loadedIncomes: IncomeEntry[] = storedIncomes ? JSON.parse(storedIncomes) : [];
-        setIncomes(loadedIncomes);
+    const loadIncomes = useCallback(async (employee: Employee) => {
+        try {
+            // Primero migrar datos existentes de localStorage a Firestore
+            await incomesService.syncFromLocalStorage(employee.name);
+            // Luego cargar desde Firestore
+            const loadedIncomes = await incomesService.getByEmployee(employee.name);
+            setIncomes(loadedIncomes);
+        } catch (error) {
+            console.error('Error al cargar ingresos:', error);
+            // Fallback a localStorage
+            const key = getIncomesKey(employee.name);
+            const storedIncomes = localStorage.getItem(key);
+            const loadedIncomes: IncomeEntry[] = storedIncomes ? JSON.parse(storedIncomes) : [];
+            setIncomes(loadedIncomes);
+        }
     }, []);
 
     const loadOwedHours = useCallback((employee: Employee) => {
@@ -273,20 +289,65 @@ export const ChecadorPage: React.FC = () => {
         }
     };
 
-    const handleSaveIncome = (data: Omit<IncomeEntry, 'id' | 'employeeName' | 'notes'>) => {
+    const handleSaveIncome = async (data: Omit<IncomeEntry, 'id' | 'employeeName' | 'notes'>) => {
         if (!authenticatedEmployee) return;
 
-        const newIncome: IncomeEntry = {
-            id: new Date().toISOString() + '-' + Math.random().toString(36).substr(2, 9),
-            employeeName: authenticatedEmployee.name,
-            ...data
-        };
+        try {
+            const newIncome = await incomesService.create({
+                employeeName: authenticatedEmployee.name,
+                ...data
+            });
+            setIncomes([...incomes, newIncome]);
+            alert('Ingreso registrado exitosamente.');
+        } catch (error) {
+            console.error('Error al guardar ingreso:', error);
+            alert('Error al guardar ingreso. Intenta de nuevo.');
+        }
+    };
 
-        const key = getIncomesKey(authenticatedEmployee.name);
-        const updatedIncomes = [...incomes, newIncome];
-        localStorage.setItem(key, JSON.stringify(updatedIncomes));
-        setIncomes(updatedIncomes);
-        alert('Ingreso registrado exitosamente.');
+    // Funciones para edición de ingresos (solo admin)
+    const handleEditIncome = (income: IncomeEntry) => {
+        setEditingIncome({ ...income });
+        setIsIncomeEditModalOpen(true);
+    };
+
+    const handleDeleteIncome = async (income: IncomeEntry) => {
+        const confirmDelete = window.confirm(
+            `¿Estás seguro de que deseas eliminar este ingreso?\n\n` +
+            `Fecha: ${new Date(income.paymentDate + 'T12:00:00').toLocaleDateString('es-MX')}\n` +
+            `Concepto: ${income.paymentConcept}\n` +
+            `Importe: $${income.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n\n` +
+            `Esta acción no se puede deshacer.`
+        );
+
+        if (!confirmDelete) return;
+
+        try {
+            await incomesService.delete(income.id, income.employeeName);
+            setIncomes(incomes.filter(i => i.id !== income.id));
+            alert('Ingreso eliminado exitosamente.');
+        } catch (error: any) {
+            console.error('Error al eliminar ingreso:', error);
+            alert(`Error al eliminar: ${error.message}`);
+        }
+    };
+
+    const handleSaveIncomeEdit = async () => {
+        if (!editingIncome) return;
+
+        setIsSavingIncome(true);
+        try {
+            await incomesService.update(editingIncome.id, editingIncome);
+            setIncomes(incomes.map(i => i.id === editingIncome.id ? editingIncome : i));
+            alert('Ingreso actualizado exitosamente.');
+            setIsIncomeEditModalOpen(false);
+            setEditingIncome(null);
+        } catch (error: any) {
+            console.error('Error al actualizar ingreso:', error);
+            alert(`Error al actualizar: ${error.message}`);
+        } finally {
+            setIsSavingIncome(false);
+        }
     };
 
     return (
@@ -297,6 +358,7 @@ export const ChecadorPage: React.FC = () => {
                 <div className="mt-8 space-y-8">
                     <div className="text-center">
                         <h2 className="text-2xl font-bold text-slate-800">Bienvenido, {authenticatedEmployee.name}</h2>
+                        {isAdmin && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full ml-2">Admin</span>}
                         <button onClick={handleLogout} className="text-sm text-amber-600 hover:underline">Cerrar sesión</button>
                     </div>
                     {owedHours > 0 && <OwedHoursDisplay hours={owedHours} />}
@@ -308,7 +370,11 @@ export const ChecadorPage: React.FC = () => {
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                         <div className="space-y-8">
                            <IncomeForm onSubmit={handleSaveIncome} />
-                           <IncomeTable incomes={incomes} />
+                           <IncomeTable
+                             incomes={incomes}
+                             onEditIncome={isAdmin ? handleEditIncome : undefined}
+                             onDeleteIncome={isAdmin ? handleDeleteIncome : undefined}
+                           />
                         </div>
                         <div>
                            <IncomeChart incomes={incomes} />
@@ -331,6 +397,101 @@ export const ChecadorPage: React.FC = () => {
                     onLogin={handleLogin}
                     onClose={() => setSelectedEmployee(null)}
                 />
+            )}
+
+            {/* Modal de Edición de Ingreso (solo admin) */}
+            {isIncomeEditModalOpen && editingIncome && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+                        <div className="p-6 border-b border-slate-200">
+                            <div className="flex justify-between items-center">
+                                <h3 className="text-xl font-bold text-slate-800">Editar Ingreso</h3>
+                                <button
+                                    onClick={() => { setIsIncomeEditModalOpen(false); setEditingIncome(null); }}
+                                    className="text-slate-400 hover:text-slate-600"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="p-6 space-y-4">
+                            {/* Colaborador (solo lectura) */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Colaborador</label>
+                                <input
+                                    type="text"
+                                    value={editingIncome.employeeName}
+                                    readOnly
+                                    className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded-md text-slate-600"
+                                />
+                            </div>
+
+                            {/* Fecha de Pago */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Fecha de Pago</label>
+                                <input
+                                    type="date"
+                                    value={editingIncome.paymentDate}
+                                    onChange={(e) => setEditingIncome({ ...editingIncome, paymentDate: e.target.value })}
+                                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm"
+                                />
+                            </div>
+
+                            {/* Concepto de Pago */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Concepto de Pago</label>
+                                <select
+                                    value={editingIncome.paymentConcept}
+                                    onChange={(e) => setEditingIncome({ ...editingIncome, paymentConcept: e.target.value as PaymentConcept })}
+                                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm"
+                                >
+                                    <option value={PaymentConcept.NOMINA}>Nómina</option>
+                                    <option value={PaymentConcept.BONOS}>Bonos</option>
+                                    <option value={PaymentConcept.CAMINATA}>Caminata</option>
+                                    <option value={PaymentConcept.COMISIONES_SOUVENIRS}>Comisiones Souvenirs</option>
+                                    <option value={PaymentConcept.COMISIONES_OBRAS}>Comisiones Obras</option>
+                                    <option value={PaymentConcept.RETAIL}>Retail</option>
+                                </select>
+                            </div>
+
+                            {/* Importe */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Importe ($)</label>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={editingIncome.amount}
+                                    onChange={(e) => setEditingIncome({ ...editingIncome, amount: parseFloat(e.target.value) || 0 })}
+                                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm"
+                                />
+                            </div>
+
+                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                                <p><strong>Nota:</strong> Esta función es para corregir errores en los registros de ingresos.</p>
+                            </div>
+                        </div>
+
+                        <div className="p-6 border-t border-slate-200 flex justify-end space-x-3">
+                            <button
+                                onClick={() => { setIsIncomeEditModalOpen(false); setEditingIncome(null); }}
+                                className="px-4 py-2 text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleSaveIncomeEdit}
+                                disabled={isSavingIncome}
+                                className="px-4 py-2 text-white bg-gradient-to-r from-amber-600 to-orange-600 rounded-md hover:from-amber-700 hover:to-orange-700 disabled:opacity-50"
+                            >
+                                {isSavingIncome ? 'Guardando...' : 'Guardar Cambios'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

@@ -49,6 +49,13 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Incomes collection (registros de ingresos económicos)
+    match /incomes/{incomeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
     // Legacy collections (mantener por compatibilidad)
     match /attendance/{docId} {
       allow read: if isAuthenticated();
