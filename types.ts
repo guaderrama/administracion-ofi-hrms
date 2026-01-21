@@ -120,6 +120,7 @@ export interface Employee {
 }
 
 export interface LogEntry {
+  id?: string; // Firestore document ID for editing/deleting
   employeeName: string;
   type: LogType;
   timestamp: number;

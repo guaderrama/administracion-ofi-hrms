@@ -149,6 +149,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
   // Estado para restablecer contraseña
   const [resettingPasswordForId, setResettingPasswordForId] = useState<string | null>(null);
+
+  // Estado para edición de logs de asistencia
+  const [editingLog, setEditingLog] = useState<LogEntry | null>(null);
+  const [isLogEditModalOpen, setIsLogEditModalOpen] = useState(false);
+  const [isSavingLog, setIsSavingLog] = useState(false);
+  const [editLogDate, setEditLogDate] = useState('');
+  const [editLogTime, setEditLogTime] = useState('');
   
   const initialScheduleState = {
     lunesMiercolesViernesEntrada: '09:00',
@@ -884,6 +891,72 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     });
   };
 
+  // Funciones para edición de logs de asistencia
+  const handleEditLog = (log: LogEntry) => {
+    setEditingLog({ ...log });
+    // Convertir timestamp a fecha y hora
+    const date = new Date(log.timestamp);
+    setEditLogDate(date.toISOString().slice(0, 10));
+    setEditLogTime(date.toTimeString().slice(0, 5));
+    setIsLogEditModalOpen(true);
+  };
+
+  const handleDeleteLog = async (log: LogEntry) => {
+    if (!log.id) {
+      alert('Este registro no tiene ID y no puede ser eliminado.');
+      return;
+    }
+
+    const confirmDelete = window.confirm(
+      `¿Estás seguro de que deseas eliminar este registro?\n\n` +
+      `Colaborador: ${log.employeeName}\n` +
+      `Tipo: ${log.type}\n` +
+      `Fecha: ${new Date(log.timestamp).toLocaleString('es-MX')}\n\n` +
+      `Esta acción no se puede deshacer.`
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      await logsService.delete(log.id);
+      alert('Registro eliminado exitosamente.');
+    } catch (error: any) {
+      console.error('Error al eliminar registro:', error);
+      alert(`Error al eliminar: ${error.message}`);
+    }
+  };
+
+  const handleSaveLogEdit = async () => {
+    if (!editingLog || !editingLog.id) {
+      alert('No se puede guardar: el registro no tiene ID.');
+      return;
+    }
+
+    setIsSavingLog(true);
+    try {
+      // Construir el nuevo timestamp desde fecha y hora
+      const [year, month, day] = editLogDate.split('-').map(Number);
+      const [hours, minutes] = editLogTime.split(':').map(Number);
+      const newTimestamp = new Date(year, month - 1, day, hours, minutes, 0, 0).getTime();
+
+      await logsService.update(editingLog.id, {
+        employeeName: editingLog.employeeName,
+        type: editingLog.type,
+        timestamp: newTimestamp,
+        location: editingLog.location,
+      });
+
+      alert('Registro actualizado exitosamente.');
+      setIsLogEditModalOpen(false);
+      setEditingLog(null);
+    } catch (error: any) {
+      console.error('Error al actualizar registro:', error);
+      alert(`Error al actualizar: ${error.message}`);
+    } finally {
+      setIsSavingLog(false);
+    }
+  };
+
   const handleDownloadEmployeesCSV = () => {
     if (detailedEmployees.length === 0) {
         alert('No hay colaboradores registrados para descargar.');
@@ -987,7 +1060,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
               <input type="date" id="endDate" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 block w-full px-3 py-2 bg-white/40 border border-slate-300 rounded-md shadow-sm"/>
             </div>
           </div>
-          <AdminLogTable logs={filteredLogs} getEffectiveScheduleTime={getEffectiveScheduleTime} />
+          <AdminLogTable
+            logs={filteredLogs}
+            getEffectiveScheduleTime={getEffectiveScheduleTime}
+            onEditLog={handleEditLog}
+            onDeleteLog={handleDeleteLog}
+          />
         </div>
 
         {/* Reportes */}
@@ -1558,6 +1636,115 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                 className="px-4 py-2 text-white bg-gradient-to-r from-amber-600 to-orange-600 rounded-md hover:from-amber-700 hover:to-orange-700 disabled:opacity-50"
               >
                 {isSavingEdit ? 'Guardando...' : 'Guardar Cambios'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Edición de Log de Asistencia */}
+      {isLogEditModalOpen && editingLog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+            <div className="p-6 border-b border-slate-200">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-slate-800">Editar Registro de Asistencia</h3>
+                <button
+                  onClick={() => { setIsLogEditModalOpen(false); setEditingLog(null); }}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Colaborador (solo lectura) */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Colaborador</label>
+                <input
+                  type="text"
+                  value={editingLog.employeeName}
+                  readOnly
+                  className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded-md text-slate-600"
+                />
+              </div>
+
+              {/* Tipo de registro */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Registro</label>
+                <select
+                  value={editingLog.type}
+                  onChange={(e) => setEditingLog({ ...editingLog, type: e.target.value as LogType })}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm"
+                >
+                  <option value={LogType.ENTRADA}>ENTRADA</option>
+                  <option value={LogType.SALIDA}>SALIDA</option>
+                  <option value={LogType.INICIO_COMIDA}>INICIO COMIDA</option>
+                  <option value={LogType.FIN_COMIDA}>FIN COMIDA</option>
+                </select>
+              </div>
+
+              {/* Fecha */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={editLogDate}
+                  onChange={(e) => setEditLogDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm"
+                />
+              </div>
+
+              {/* Hora */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Hora</label>
+                <input
+                  type="time"
+                  value={editLogTime}
+                  onChange={(e) => setEditLogTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm"
+                />
+              </div>
+
+              {/* Ubicación (solo lectura si existe) */}
+              {editingLog.location && (
+                <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-600">
+                  <p><strong>Ubicación registrada:</strong></p>
+                  <p className="font-mono text-xs mt-1">
+                    {editingLog.location.lat.toFixed(6)}, {editingLog.location.lon.toFixed(6)}
+                  </p>
+                  <a
+                    href={`https://www.google.com/maps?q=${editingLog.location.lat},${editingLog.location.lon}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-amber-600 hover:underline text-xs"
+                  >
+                    Ver en mapa
+                  </a>
+                </div>
+              )}
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                <p><strong>Nota:</strong> Esta función es para corregir errores en los registros. Use con responsabilidad.</p>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex justify-end space-x-3">
+              <button
+                onClick={() => { setIsLogEditModalOpen(false); setEditingLog(null); }}
+                className="px-4 py-2 text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveLogEdit}
+                disabled={isSavingLog}
+                className="px-4 py-2 text-white bg-gradient-to-r from-amber-600 to-orange-600 rounded-md hover:from-amber-700 hover:to-orange-700 disabled:opacity-50"
+              >
+                {isSavingLog ? 'Guardando...' : 'Guardar Cambios'}
               </button>
             </div>
           </div>

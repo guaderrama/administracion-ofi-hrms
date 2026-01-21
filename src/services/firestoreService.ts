@@ -187,7 +187,10 @@ export const logsService = {
       const querySnapshot = await getDocs(
         query(collection(db, LOGS_COLLECTION), orderBy('timestamp', 'desc'))
       );
-      return querySnapshot.docs.map(doc => doc.data() as LogEntry);
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id,
+      })) as LogEntry[];
     } catch (error) {
       console.error('Error al obtener logs:', error);
       const stored = localStorage.getItem('all_employee_logs');
@@ -209,7 +212,10 @@ export const logsService = {
           orderBy('timestamp', 'desc')
         )
       );
-      return querySnapshot.docs.map(doc => doc.data() as LogEntry);
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id,
+      })) as LogEntry[];
     } catch (error) {
       console.error('Error al obtener logs por fecha:', error);
       return [];
@@ -235,12 +241,60 @@ export const logsService = {
     }
   },
 
+  // Actualizar log existente (para correcciones del admin)
+  async update(logId: string, data: Partial<LogEntry>): Promise<void> {
+    try {
+      const docRef = doc(db, LOGS_COLLECTION, logId);
+      // Removemos el id del objeto data antes de actualizar
+      const { id, ...updateData } = data as LogEntry;
+      await updateDoc(docRef, {
+        ...updateData,
+        updatedAt: Timestamp.now(),
+      });
+
+      // Actualizar localStorage
+      const stored = localStorage.getItem('all_employee_logs');
+      if (stored) {
+        const logs = JSON.parse(stored);
+        const index = logs.findIndex((l: LogEntry) => l.id === logId);
+        if (index !== -1) {
+          logs[index] = { ...logs[index], ...updateData };
+          localStorage.setItem('all_employee_logs', JSON.stringify(logs));
+        }
+      }
+    } catch (error) {
+      console.error('Error al actualizar log:', error);
+      throw error;
+    }
+  },
+
+  // Eliminar log (para correcciones del admin)
+  async delete(logId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, LOGS_COLLECTION, logId));
+
+      // Eliminar de localStorage
+      const stored = localStorage.getItem('all_employee_logs');
+      if (stored) {
+        const logs = JSON.parse(stored);
+        const filtered = logs.filter((l: LogEntry) => l.id !== logId);
+        localStorage.setItem('all_employee_logs', JSON.stringify(filtered));
+      }
+    } catch (error) {
+      console.error('Error al eliminar log:', error);
+      throw error;
+    }
+  },
+
   // Suscribirse a cambios en tiempo real
   subscribe(callback: (logs: LogEntry[]) => void): () => void {
     const unsubscribe = onSnapshot(
       query(collection(db, LOGS_COLLECTION), orderBy('timestamp', 'desc')),
       (snapshot) => {
-        const logs = snapshot.docs.map(doc => doc.data() as LogEntry);
+        const logs = snapshot.docs.map(doc => ({
+          ...doc.data(),
+          id: doc.id,
+        })) as LogEntry[];
         localStorage.setItem('all_employee_logs', JSON.stringify(logs));
         callback(logs);
       },
