@@ -1,4 +1,5 @@
 {
+  "exclude": ["index.ts", "node_modules", "dist"],
   "compilerOptions": {
     "target": "ES2022",
     "experimentalDecorators": true,
@@ -12,7 +13,8 @@
     "skipLibCheck": true,
     "types": [
       "node",
-      "vite/client"
+      "vite/client",
+      "@testing-library/jest-dom"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { DetailedEmployee } from '../../types';
+import type { DetailedEmployee } from '@/types';
 
 // Icons
 const CakeIcon: React.FC = () => (
