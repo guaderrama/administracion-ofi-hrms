@@ -231,6 +231,8 @@ export const logsService = {
       const endOfDay = new Date(targetDate);
       endOfDay.setHours(23, 59, 59, 999);
 
+      console.log(`Buscando logs para: ${employeeName}, fecha: ${targetDate.toISOString().slice(0,10)}`);
+
       const querySnapshot = await getDocs(
         query(
           collection(db, LOGS_COLLECTION),
@@ -240,12 +242,19 @@ export const logsService = {
           orderBy('timestamp', 'asc')
         )
       );
+
+      console.log(`Logs encontrados: ${querySnapshot.docs.length}`);
+
       return querySnapshot.docs.map(doc => ({
         ...doc.data(),
         id: doc.id,
       })) as LogEntry[];
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error al obtener logs por empleado y fecha:', error);
+      // Si el error es por índice faltante, mostrar mensaje claro
+      if (error instanceof Error && error.message.includes('index')) {
+        console.error('⚠️ Se requiere crear un índice en Firestore. El índice se está construyendo, intenta de nuevo en unos minutos.');
+      }
       return [];
     }
   },
