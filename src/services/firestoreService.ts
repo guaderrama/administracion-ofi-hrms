@@ -222,6 +222,34 @@ export const logsService = {
     }
   },
 
+  // Obtener logs de un empleado para una fecha específica (hoy por defecto)
+  async getByEmployeeAndDate(employeeName: string, date?: Date): Promise<LogEntry[]> {
+    try {
+      const targetDate = date || new Date();
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const querySnapshot = await getDocs(
+        query(
+          collection(db, LOGS_COLLECTION),
+          where('employeeName', '==', employeeName),
+          where('timestamp', '>=', startOfDay.getTime()),
+          where('timestamp', '<=', endOfDay.getTime()),
+          orderBy('timestamp', 'asc')
+        )
+      );
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id,
+      })) as LogEntry[];
+    } catch (error) {
+      console.error('Error al obtener logs por empleado y fecha:', error);
+      return [];
+    }
+  },
+
   // Crear nuevo log
   async create(log: LogEntry): Promise<void> {
     try {

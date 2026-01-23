@@ -156,30 +156,43 @@ export const ChecadorPage: React.FC = () => {
         return `incomes_${employeeName.replace(/\s+/g, '_')}`;
     };
     
-    const loadDailyLogs = useCallback((employee: Employee) => {
-        const key = getTodayKey(employee.name);
-        const storedLogs = localStorage.getItem(key);
-        const logs: LogEntry[] = storedLogs ? JSON.parse(storedLogs) : [];
-        setDailyLogs(logs);
+    const loadDailyLogs = useCallback(async (employee: Employee) => {
+        try {
+            // Cargar desde Firestore (datos sincronizados entre dispositivos)
+            const logs = await logsService.getByEmployeeAndDate(employee.name);
+            setDailyLogs(logs);
 
-        const lastLog = logs[logs.length - 1];
-        if (!lastLog) {
-            setClockStatus(ClockStatus.OUT_OF_OFFICE);
-        } else {
-            switch (lastLog.type) {
-                case LogType.ENTRADA:
-                    setClockStatus(ClockStatus.WORKING);
-                    break;
-                case LogType.INICIO_COMIDA:
-                    setClockStatus(ClockStatus.ON_LUNCH);
-                    break;
-                case LogType.FIN_COMIDA:
-                    setClockStatus(ClockStatus.WORKING);
-                    break;
-                case LogType.SALIDA:
-                    setClockStatus(ClockStatus.OUT_OF_OFFICE);
-                    break;
+            // Actualizar localStorage como cache local
+            const key = getTodayKey(employee.name);
+            localStorage.setItem(key, JSON.stringify(logs));
+
+            // Determinar estado del reloj basado en el último registro
+            const lastLog = logs[logs.length - 1];
+            if (!lastLog) {
+                setClockStatus(ClockStatus.OUT_OF_OFFICE);
+            } else {
+                switch (lastLog.type) {
+                    case LogType.ENTRADA:
+                        setClockStatus(ClockStatus.WORKING);
+                        break;
+                    case LogType.INICIO_COMIDA:
+                        setClockStatus(ClockStatus.ON_LUNCH);
+                        break;
+                    case LogType.FIN_COMIDA:
+                        setClockStatus(ClockStatus.WORKING);
+                        break;
+                    case LogType.SALIDA:
+                        setClockStatus(ClockStatus.OUT_OF_OFFICE);
+                        break;
+                }
             }
+        } catch (error) {
+            console.error('Error al cargar registros desde Firestore:', error);
+            // Fallback a localStorage si Firestore falla
+            const key = getTodayKey(employee.name);
+            const storedLogs = localStorage.getItem(key);
+            const logs: LogEntry[] = storedLogs ? JSON.parse(storedLogs) : [];
+            setDailyLogs(logs);
         }
     }, []);
     
