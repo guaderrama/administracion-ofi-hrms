@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
+import { MobileHeader } from './components/MobileHeader';
 import { PermissionGeneratorPage } from './components/PermissionGeneratorPage';
 import { RequisitionsPage } from './components/RequisitionsPage';
 import { VacationSlipPage } from './components/VacationSlipPage';
@@ -13,6 +14,18 @@ import { useAuth } from './src/contexts/AuthContext';
 const App: React.FC = () => {
   const { user, loading, isAdmin } = useAuth();
   const [currentView, setCurrentView] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Cerrar sidebar cuando cambia el tamaño de pantalla a desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Proteger rutas de admin - redirigir si no es admin
   useEffect(() => {
@@ -79,9 +92,20 @@ const App: React.FC = () => {
   // Usuario autenticado - mostrar app normal
   return (
     <div className="flex h-screen bg-slate-50 font-sans">
-      <Sidebar setView={setCurrentView} currentView={currentView} />
+      {/* Header móvil */}
+      <MobileHeader onMenuToggle={() => setIsSidebarOpen(true)} />
+
+      {/* Sidebar responsive */}
+      <Sidebar
+        setView={setCurrentView}
+        currentView={currentView}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+      />
+
+      {/* Contenido principal */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <main className="flex-1 overflow-x-hidden overflow-y-auto">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto pt-14 lg:pt-0">
            {/* El fondo degradado se aplica desde el body, así que se verá aquí */}
            {renderView()}
         </main>

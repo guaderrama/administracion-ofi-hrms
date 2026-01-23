@@ -48,11 +48,27 @@ const LogoutIcon: React.FC<{className?: string}> = ({ className }) => (
 interface SidebarProps {
   setView: (view: string) => void;
   currentView: string;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView }) => {
+const CloseIcon: React.FC<{className?: string}> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+);
+
+export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen = true, onClose }) => {
   const [openSection, setOpenSection] = useState<string>('checador');
   const { isAdmin, userData, logout } = useAuth();
+
+  const handleNavigation = (view: string) => {
+    setView(view);
+    // Cerrar sidebar en móvil después de navegar
+    if (onClose && window.innerWidth < 1024) {
+      onClose();
+    }
+  };
 
   const toggleSection = (section: string) => {
     setOpenSection(openSection === section ? '' : section);
@@ -70,7 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView }) => {
     <li className="mt-1">
       <a
         href="#"
-        onClick={(e) => { e.preventDefault(); setView(view); }}
+        onClick={(e) => { e.preventDefault(); handleNavigation(view); }}
         className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-150 ${
           currentView === view
             ? 'bg-amber-800 text-white'
@@ -106,10 +122,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView }) => {
 
 
   return (
-    <div className="flex-shrink-0 w-64 bg-[#4A3728] text-white flex flex-col shadow-2xl z-10">
-      <div className="flex items-center justify-center h-16 flex-shrink-0 px-4 border-b border-amber-900/50">
-        <h1 className="font-serif text-2xl text-amber-50">Portal Interno</h1>
-      </div>
+    <>
+      {/* Overlay para móvil */}
+      {isOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={onClose}
+        />
+      )}
+
+      <div className={`
+        fixed lg:static inset-y-0 left-0 z-50
+        flex-shrink-0 w-64 bg-[#4A3728] text-white flex flex-col shadow-2xl
+        transform transition-transform duration-300 ease-in-out
+        ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        <div className="flex items-center justify-between h-16 flex-shrink-0 px-4 border-b border-amber-900/50">
+          <h1 className="font-serif text-2xl text-amber-50">Portal Interno</h1>
+          {/* Botón cerrar solo en móvil */}
+          <button
+            onClick={onClose}
+            className="lg:hidden p-1 rounded-md hover:bg-amber-900/50 transition-colors"
+            aria-label="Cerrar menú"
+          >
+            <CloseIcon />
+          </button>
+        </div>
 
       {/* Info del usuario */}
       <div className="px-4 py-3 border-b border-amber-900/50">
@@ -125,7 +163,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView }) => {
         <nav className="px-2 py-4 space-y-4">
           <a
             href="#"
-            onClick={(e) => { e.preventDefault(); setView('dashboard'); }}
+            onClick={(e) => { e.preventDefault(); handleNavigation('dashboard'); }}
             className={`group flex items-center px-2 py-2 text-base font-medium rounded-md ${
               currentView === 'dashboard'
                 ? 'bg-amber-800 text-white'
@@ -164,7 +202,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView }) => {
                 <li className="mt-1">
                   <a
                     href="#"
-                    onClick={(e) => { e.preventDefault(); setView('requisitions'); }}
+                    onClick={(e) => { e.preventDefault(); handleNavigation('requisitions'); }}
                     className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-150 ${
                       currentView === 'requisitions'
                         ? 'bg-amber-800 text-white'
@@ -184,7 +222,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView }) => {
             {isAdmin && (
               <a
                   href="#"
-                  onClick={(e) => { e.preventDefault(); setView('admin'); }}
+                  onClick={(e) => { e.preventDefault(); handleNavigation('admin'); }}
                   className={`group flex items-center px-2 py-2 text-base font-medium rounded-md ${
                   currentView === 'admin'
                       ? 'bg-amber-800 text-white'
@@ -207,5 +245,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView }) => {
         </div>
       </div>
     </div>
+    </>
   );
 };

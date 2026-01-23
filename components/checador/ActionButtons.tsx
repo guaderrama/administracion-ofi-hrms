@@ -21,7 +21,7 @@ const ActionButton: React.FC<{ onClick: () => void; text: string; icon: React.Re
 
 export const ActionButtons: React.FC<ActionButtonsProps> = ({ status, onLog }) => {
     return (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-col sm:flex-row gap-4">
             {status === ClockStatus.OUT_OF_OFFICE && (
                 <ActionButton onClick={() => onLog(LogType.ENTRADA)} text="Registrar Entrada" icon={<CheckIcon />} className="bg-gradient-to-br from-green-500 to-emerald-600" />
             )}
