@@ -233,28 +233,32 @@ export const logsService = {
 
       console.log(`Buscando logs para: ${employeeName}, fecha: ${targetDate.toISOString().slice(0,10)}`);
 
+      // Consulta simple solo por employeeName (evita necesidad de índice compuesto)
       const querySnapshot = await getDocs(
         query(
           collection(db, LOGS_COLLECTION),
-          where('employeeName', '==', employeeName),
-          where('timestamp', '>=', startOfDay.getTime()),
-          where('timestamp', '<=', endOfDay.getTime()),
-          orderBy('timestamp', 'asc')
+          where('employeeName', '==', employeeName)
         )
       );
 
-      console.log(`Logs encontrados: ${querySnapshot.docs.length}`);
-
-      return querySnapshot.docs.map(doc => ({
+      // Filtrar por fecha en el cliente
+      const allLogs = querySnapshot.docs.map(doc => ({
         ...doc.data(),
         id: doc.id,
       })) as LogEntry[];
+
+      const filteredLogs = allLogs
+        .filter(log => {
+          const logTime = log.timestamp;
+          return logTime >= startOfDay.getTime() && logTime <= endOfDay.getTime();
+        })
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      console.log(`Logs encontrados: ${filteredLogs.length} de ${allLogs.length} totales`);
+
+      return filteredLogs;
     } catch (error: unknown) {
       console.error('Error al obtener logs por empleado y fecha:', error);
-      // Si el error es por índice faltante, mostrar mensaje claro
-      if (error instanceof Error && error.message.includes('index')) {
-        console.error('⚠️ Se requiere crear un índice en Firestore. El índice se está construyendo, intenta de nuevo en unos minutos.');
-      }
       return [];
     }
   },
