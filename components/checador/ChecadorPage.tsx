@@ -191,7 +191,13 @@ export const ChecadorPage: React.FC = () => {
             // Fallback a localStorage si Firestore falla
             const key = getTodayKey(employee.name);
             const storedLogs = localStorage.getItem(key);
-            const logs: LogEntry[] = storedLogs ? JSON.parse(storedLogs) : [];
+            let logs: LogEntry[] = [];
+            try {
+                logs = storedLogs ? JSON.parse(storedLogs) : [];
+            } catch {
+                // localStorage corrupto, usar array vacío
+                localStorage.removeItem(key);
+            }
             setDailyLogs(logs);
         }
     }, []);
@@ -208,7 +214,13 @@ export const ChecadorPage: React.FC = () => {
             // Fallback a localStorage
             const key = getIncomesKey(employee.name);
             const storedIncomes = localStorage.getItem(key);
-            const loadedIncomes: IncomeEntry[] = storedIncomes ? JSON.parse(storedIncomes) : [];
+            let loadedIncomes: IncomeEntry[] = [];
+            try {
+                loadedIncomes = storedIncomes ? JSON.parse(storedIncomes) : [];
+            } catch {
+                // localStorage corrupto, usar array vacío
+                localStorage.removeItem(key);
+            }
             setIncomes(loadedIncomes);
         }
     }, []);
@@ -216,8 +228,14 @@ export const ChecadorPage: React.FC = () => {
     const loadOwedHours = useCallback((employee: Employee) => {
         const storedOwedHours = localStorage.getItem('employee_owed_hours');
         if (storedOwedHours) {
-            const allOwedHours = JSON.parse(storedOwedHours);
-            setOwedHours(allOwedHours[employee.name] || 0);
+            try {
+                const allOwedHours = JSON.parse(storedOwedHours);
+                setOwedHours(allOwedHours[employee.name] || 0);
+            } catch {
+                // localStorage corrupto
+                localStorage.removeItem('employee_owed_hours');
+                setOwedHours(0);
+            }
         } else {
             setOwedHours(0);
         }

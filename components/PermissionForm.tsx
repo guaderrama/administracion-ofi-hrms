@@ -98,7 +98,13 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
       return;
     }
 
-    const detailedEmployees: DetailedEmployee[] = JSON.parse(storedEmployeesStr);
+    let detailedEmployees: DetailedEmployee[] = [];
+    try {
+      detailedEmployees = JSON.parse(storedEmployeesStr);
+    } catch {
+      setCodeError('Error al leer datos de empleados. Recarga la página.');
+      return;
+    }
     const foundEmployee = detailedEmployees.find(emp => emp.codigo === code);
 
     if (foundEmployee) {
