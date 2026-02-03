@@ -254,13 +254,8 @@ export const ChecadorPage: React.FC = () => {
         const employee = filteredEmployees.find(e => e.name === employeeName) ||
                         EMPLOYEES.find(e => e.name === employeeName);
         if (employee) {
-            // Si es admin, autenticar directamente sin pedir PIN
-            if (isAdmin) {
-                setAuthenticatedEmployee(employee);
-            } else {
-                // Si es empleado normal, mostrar modal de PIN
-                setSelectedEmployee(employee);
-            }
+            // Acceso directo sin PIN para todos los colaboradores
+            setAuthenticatedEmployee(employee);
         }
     };
 
