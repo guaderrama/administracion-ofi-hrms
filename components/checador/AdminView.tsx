@@ -863,18 +863,29 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
     try {
       await sendPasswordResetEmail(auth, employee.email);
+
+      // Registrar la fecha del restablecimiento en el empleado
+      const resetDate = new Date().toISOString();
+      await employeesService.update(employee.id, { lastPasswordReset: resetDate });
+
+      // Actualizar estado local
+      setDetailedEmployees(prev =>
+        prev.map(emp => emp.id === employee.id ? { ...emp, lastPasswordReset: resetDate } : emp)
+      );
+
       alert(
         `Email enviado exitosamente a ${employee.email}\n\n` +
         `El colaborador debe revisar su bandeja de entrada (y spam) para restablecer su contraseña.`
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error al enviar email de restablecimiento:', error);
-      if (error.code === 'auth/user-not-found') {
+      const firebaseError = error as { code?: string; message?: string };
+      if (firebaseError.code === 'auth/user-not-found') {
         alert('No existe una cuenta con este email. Primero debes crear la cuenta de acceso.');
-      } else if (error.code === 'auth/invalid-email') {
+      } else if (firebaseError.code === 'auth/invalid-email') {
         alert('El email no es válido.');
       } else {
-        alert(`Error al enviar email: ${error.message}`);
+        alert(`Error al enviar email: ${firebaseError.message || 'Error desconocido'}`);
       }
     } finally {
       setResettingPasswordForId(null);
@@ -1613,6 +1624,40 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                   <input type="number" step="0.01" min="0" name="apoyoGasolina" value={editingEmployee.apoyoGasolina} onChange={handleEditFormChange} className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md"/>
                 </div>
               </div>
+
+              {/* Gestión de Contraseña */}
+              {editingEmployee.firebaseUid && editingEmployee.email && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                  <label className="block text-sm font-medium text-amber-800 mb-2">Gestión de Contraseña</label>
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-slate-600">
+                      {editingEmployee.lastPasswordReset ? (
+                        <p>Último restablecimiento: <strong>{new Date(editingEmployee.lastPasswordReset).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong></p>
+                      ) : (
+                        <p className="text-slate-400">Sin restablecimientos registrados</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleResetPassword(editingEmployee)}
+                      disabled={resettingPasswordForId === editingEmployee.id}
+                      className="ml-3 px-3 py-1.5 text-sm text-white bg-amber-600 hover:bg-amber-700 rounded-md disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {resettingPasswordForId === editingEmployee.id ? (
+                        <>
+                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Enviando...
+                        </>
+                      ) : (
+                        'Enviar email de restablecimiento'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Info adicional */}
               <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-600">

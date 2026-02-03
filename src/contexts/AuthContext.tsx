@@ -8,6 +8,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
+  sendPasswordResetEmail,
   UserCredential
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -35,6 +36,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<UserCredential>;
   register: (email: string, password: string) => Promise<UserCredential>;
   logout: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
 }
 
 // Valor inicial del contexto
@@ -47,6 +49,7 @@ const AuthContext = createContext<AuthContextType>({
   login: async () => { throw new Error('AuthProvider not initialized'); },
   register: async () => { throw new Error('AuthProvider not initialized'); },
   logout: async () => { throw new Error('AuthProvider not initialized'); },
+  resetPassword: async () => { throw new Error('AuthProvider not initialized'); },
 });
 
 // Hook para usar el contexto de autenticación
@@ -176,6 +179,18 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
     }
   };
 
+  // Función de restablecimiento de contraseña
+  const resetPassword = async (email: string): Promise<void> => {
+    setError(null);
+    try {
+      await sendPasswordResetEmail(auth, email);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error al enviar email';
+      setError(message);
+      throw err;
+    }
+  };
+
   // Función de logout
   const logout = async (): Promise<void> => {
     setError(null);
@@ -198,6 +213,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
     login,
     register,
     logout,
+    resetPassword,
   };
 
   return (
