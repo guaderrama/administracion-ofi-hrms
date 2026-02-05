@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { VacationRequest } from '../types';
+import type { VacationRequest, DetailedEmployee } from '../types';
 import { calculateVacationDays } from '../utils/vacationCalculator';
+import { employeesService } from '../src/services/firestoreService';
 
 interface VacationFormProps {
   onSubmit: (data: VacationRequest) => void;
@@ -40,10 +41,51 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
     additionalNotes: '',
   });
 
+  const [employeeCode, setEmployeeCode] = useState('');
+  const [employees, setEmployees] = useState<DetailedEmployee[]>([]);
+  const [codeStatus, setCodeStatus] = useState<'idle' | 'found' | 'not_found'>('idle');
   const [dateToAdd, setDateToAdd] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [excludeSaturdays, setExcludeSaturdays] = useState(false);
+
+  // Cargar empleados desde Firestore
+  useEffect(() => {
+    const unsubscribe = employeesService.subscribe((emps) => setEmployees(emps));
+    return () => unsubscribe();
+  }, []);
+
+  // Buscar empleado por código
+  const handleCodeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const code = e.target.value;
+    setEmployeeCode(code);
+
+    if (!code.trim()) {
+      setCodeStatus('idle');
+      setFormData(prev => ({
+        ...prev,
+        firstName: '',
+        lastName: '',
+        motherLastName: '',
+        hireDate: '',
+      }));
+      return;
+    }
+
+    const found = employees.find(emp => emp.codigo === code.trim());
+    if (found) {
+      setCodeStatus('found');
+      setFormData(prev => ({
+        ...prev,
+        firstName: found.nombres,
+        lastName: found.paterno,
+        motherLastName: found.materno,
+        hireDate: found.fechaIngreso,
+      }));
+    } else {
+      setCodeStatus('not_found');
+    }
+  }, [employees]);
 
   useEffect(() => {
     const entitledDays = calculateVacationDays(formData.hireDate, formData.requestDate);
@@ -137,12 +179,38 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
       <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 space-y-4">
         <h3 className="text-lg leading-6 font-medium text-slate-800">Datos del Colaborador</h3>
         <InputField label="Fecha de Solicitud" id="requestDate" type="date" value={formData.requestDate} onChange={handleChange} />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <InputField label="Nombre(s)" id="firstName" value={formData.firstName} onChange={handleChange} />
-            <InputField label="Apellido Paterno" id="lastName" value={formData.lastName} onChange={handleChange} />
-            <InputField label="Apellido Materno" id="motherLastName" value={formData.motherLastName} onChange={handleChange} />
+        <div>
+          <label htmlFor="employeeCode" className="block text-sm font-medium text-slate-700">Código de Empleado</label>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              type="text"
+              id="employeeCode"
+              value={employeeCode}
+              onChange={handleCodeChange}
+              placeholder="Ingresa tu código"
+              className="block w-full px-3 py-2 bg-white/40 border border-slate-300 rounded-md shadow-sm text-slate-900 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent sm:text-sm"
+            />
+            {codeStatus === 'found' && (
+              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap">
+                Encontrado
+              </span>
+            )}
+            {codeStatus === 'not_found' && employeeCode.trim() && (
+              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 whitespace-nowrap">
+                No encontrado
+              </span>
+            )}
+          </div>
+          {codeStatus === 'not_found' && employeeCode.trim() && (
+            <p className="mt-1 text-xs text-red-600">No se encontró un colaborador con ese código. Verifica e intenta de nuevo.</p>
+          )}
         </div>
-        <InputField label="Fecha de Ingreso a la Empresa" id="hireDate" type="date" value={formData.hireDate} onChange={handleChange} />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <InputField label="Nombre(s)" id="firstName" value={formData.firstName} onChange={handleChange} readOnly={codeStatus === 'found'} />
+            <InputField label="Apellido Paterno" id="lastName" value={formData.lastName} onChange={handleChange} readOnly={codeStatus === 'found'} />
+            <InputField label="Apellido Materno" id="motherLastName" value={formData.motherLastName} onChange={handleChange} readOnly={codeStatus === 'found'} />
+        </div>
+        <InputField label="Fecha de Ingreso a la Empresa" id="hireDate" type="date" value={formData.hireDate} onChange={handleChange} readOnly={codeStatus === 'found'} />
       </div>
       
       <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 space-y-4">
