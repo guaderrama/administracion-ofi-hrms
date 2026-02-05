@@ -8,6 +8,7 @@ import { LoanRequestPage } from './components/LoanRequestPage';
 import { ChecadorPage } from './components/checador/ChecadorPage';
 import { DashboardPage } from './components/DashboardPage';
 import { AdminPage } from './components/AdminPage';
+import { NominasPage } from './components/NominasPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { useAuth } from './src/contexts/AuthContext';
 
@@ -30,7 +31,7 @@ const App: React.FC = () => {
   // Proteger rutas de admin - redirigir si no es admin
   useEffect(() => {
     if (!loading && user && !isAdmin) {
-      const adminOnlyRoutes = ['admin', 'requisitions'];
+      const adminOnlyRoutes = ['admin', 'requisitions', 'nominas'];
       if (adminOnlyRoutes.includes(currentView)) {
         setCurrentView('dashboard');
       }
@@ -66,6 +67,10 @@ const App: React.FC = () => {
         // Solo admin puede ver el panel de administrador
         if (!isAdmin) return <DashboardPage />;
         return <AdminPage setView={setCurrentView} />;
+      case 'nominas':
+        // Solo admin puede ver nóminas
+        if (!isAdmin) return <DashboardPage />;
+        return <NominasPage setView={setCurrentView} />;
       default:
         // Vista por defecto si ninguna coincide
         return <DashboardPage />;
