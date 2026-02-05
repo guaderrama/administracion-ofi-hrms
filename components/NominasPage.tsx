@@ -8,7 +8,9 @@ import {
   getPeriodLabel,
   getMonthName,
   calculateSalary,
+  calculateVacation,
   formatCurrency,
+  formatDateShort,
   getEmployeeFullName,
 } from './nominasUtils';
 import type { DetailedEmployee } from '../types';
@@ -234,27 +236,47 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b-2 border-slate-200">
-                <th className="text-left py-3 px-3 font-semibold text-slate-600">Código</th>
-                <th className="text-left py-3 px-3 font-semibold text-slate-600">Nombre Completo</th>
-                <th className="text-right py-3 px-3 font-semibold text-slate-600">Bono Puntualidad</th>
-                <th className="text-right py-3 px-3 font-semibold text-slate-600">Bono Objetivos</th>
-                <th className="text-right py-3 px-3 font-semibold text-slate-600">Apoyo Gasolina</th>
-                <th className="text-right py-3 px-3 font-semibold text-slate-600">Total</th>
-                <th className="text-center py-3 px-3 font-semibold text-slate-600">Acciones</th>
+                <th className="text-left py-3 px-2 font-semibold text-slate-600 text-xs">Código</th>
+                <th className="text-left py-3 px-2 font-semibold text-slate-600 text-xs">Nombre Completo</th>
+                <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Fecha Ingreso</th>
+                <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Días Vacaciones</th>
+                <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Aplica Vacaciones</th>
+                <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Puntualidad</th>
+                <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Objetivos</th>
+                <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Apoyo Gasolina</th>
+                <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Total</th>
+                <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {employees.map((emp) => {
                 const salary = calculateSalary(emp);
+                const vacation = calculateVacation(emp.fechaIngreso);
                 return (
                   <tr key={emp.id} className="border-b border-slate-100 hover:bg-amber-50/50 transition-colors">
-                    <td className="py-3 px-3 font-mono text-xs text-slate-500">{emp.codigo}</td>
-                    <td className="py-3 px-3 font-medium text-slate-800">{getEmployeeFullName(emp)}</td>
-                    <td className="py-3 px-3 text-right">{formatCurrency(salary.bonoPuntualidad)}</td>
-                    <td className="py-3 px-3 text-right">{formatCurrency(salary.bonoObjetivos)}</td>
-                    <td className="py-3 px-3 text-right">{formatCurrency(salary.apoyoGasolina)}</td>
-                    <td className="py-3 px-3 text-right font-bold text-amber-800">{formatCurrency(salary.netoAPagar)}</td>
-                    <td className="py-3 px-3 text-center">
+                    <td className="py-3 px-2 font-mono text-xs text-slate-500">{emp.codigo}</td>
+                    <td className="py-3 px-2 font-medium text-slate-800 text-sm">{getEmployeeFullName(emp)}</td>
+                    <td className="py-3 px-2 text-center text-xs text-slate-600">{formatDateShort(emp.fechaIngreso)}</td>
+                    <td className="py-3 px-2 text-center">
+                      <span className="font-semibold text-slate-800">{vacation.daysEntitled}</span>
+                      <span className="text-xs text-slate-500 ml-1">({vacation.yearsWorked} {vacation.yearsWorked === 1 ? 'año' : 'años'})</span>
+                    </td>
+                    <td className="py-3 px-2 text-center">
+                      {vacation.eligible ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          Si aplica
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                          No aplica
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoPuntualidad)}</td>
+                    <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoObjetivos)}</td>
+                    <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.apoyoGasolina)}</td>
+                    <td className="py-3 px-2 text-right font-bold text-amber-800">{formatCurrency(salary.netoAPagar)}</td>
+                    <td className="py-3 px-2 text-center">
                       <button
                         onClick={() => handleGenerateSingle(emp)}
                         disabled={isGenerating}
@@ -269,11 +291,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-slate-300 bg-slate-50">
-                <td className="py-3 px-3 font-bold text-slate-700" colSpan={2}>TOTALES</td>
-                <td className="py-3 px-3 text-right font-bold text-slate-700">{formatCurrency(totals.bonoPuntualidad)}</td>
-                <td className="py-3 px-3 text-right font-bold text-slate-700">{formatCurrency(totals.bonoObjetivos)}</td>
-                <td className="py-3 px-3 text-right font-bold text-slate-700">{formatCurrency(totals.apoyoGasolina)}</td>
-                <td className="py-3 px-3 text-right font-bold text-amber-800 text-base">{formatCurrency(totals.total)}</td>
+                <td className="py-3 px-2 font-bold text-slate-700" colSpan={5}>TOTALES</td>
+                <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoPuntualidad)}</td>
+                <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoObjetivos)}</td>
+                <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.apoyoGasolina)}</td>
+                <td className="py-3 px-2 text-right font-bold text-amber-800 text-base">{formatCurrency(totals.total)}</td>
                 <td></td>
               </tr>
             </tfoot>
