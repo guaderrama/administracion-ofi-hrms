@@ -73,5 +73,11 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
+
+    // Menu Configuration collection (configuración de menú RH)
+    match /menu_config/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
   }
 }
