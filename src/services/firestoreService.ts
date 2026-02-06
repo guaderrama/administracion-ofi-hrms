@@ -768,6 +768,100 @@ export const incomesService = {
 };
 
 // ============================================
+// CONFIGURACIÓN DE MENÚ (menu_config)
+// ============================================
+
+const MENU_CONFIG_COLLECTION = 'menu_config';
+const MENU_CONFIG_DOC = 'rh_options';
+
+export interface MenuOptionConfig {
+  id: string;
+  label: string;
+  view: string;
+  enabled: boolean;
+}
+
+export interface MenuConfig {
+  options: MenuOptionConfig[];
+  updatedAt?: Timestamp;
+}
+
+// Configuración por defecto de las opciones de RH
+const DEFAULT_MENU_CONFIG: MenuConfig = {
+  options: [
+    { id: 'permission-generator', label: 'Permiso Laboral', view: 'rh/permission-generator', enabled: true },
+    { id: 'vacation-slip', label: 'Papeleta de vacaciones', view: 'rh/vacation-slip', enabled: true },
+    { id: 'loan-request', label: 'Solicitud de Préstamo', view: 'rh/loan-request', enabled: true },
+  ],
+};
+
+export const menuConfigService = {
+  // Obtener configuración actual
+  async get(): Promise<MenuConfig> {
+    try {
+      const docRef = doc(db, MENU_CONFIG_COLLECTION, MENU_CONFIG_DOC);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        return docSnap.data() as MenuConfig;
+      }
+
+      // Si no existe, crear con valores por defecto
+      await setDoc(docRef, DEFAULT_MENU_CONFIG);
+      return DEFAULT_MENU_CONFIG;
+    } catch (error) {
+      console.error('Error al obtener configuración de menú:', error);
+      return DEFAULT_MENU_CONFIG;
+    }
+  },
+
+  // Actualizar configuración
+  async update(config: MenuConfig): Promise<void> {
+    try {
+      const docRef = doc(db, MENU_CONFIG_COLLECTION, MENU_CONFIG_DOC);
+      await setDoc(docRef, {
+        ...config,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (error) {
+      console.error('Error al actualizar configuración de menú:', error);
+      throw error;
+    }
+  },
+
+  // Suscribirse a cambios en tiempo real
+  subscribe(callback: (config: MenuConfig) => void): () => void {
+    const docRef = doc(db, MENU_CONFIG_COLLECTION, MENU_CONFIG_DOC);
+    const unsubscribe = onSnapshot(
+      docRef,
+      async (docSnap) => {
+        if (docSnap.exists()) {
+          callback(docSnap.data() as MenuConfig);
+        } else {
+          // Crear con valores por defecto si no existe
+          await setDoc(docRef, DEFAULT_MENU_CONFIG);
+          callback(DEFAULT_MENU_CONFIG);
+        }
+      },
+      (error) => {
+        console.error('Error en suscripción de configuración de menú:', error);
+        callback(DEFAULT_MENU_CONFIG);
+      }
+    );
+    return unsubscribe;
+  },
+
+  // Habilitar/deshabilitar una opción específica
+  async toggleOption(optionId: string, enabled: boolean): Promise<void> {
+    const config = await this.get();
+    const updatedOptions = config.options.map(opt =>
+      opt.id === optionId ? { ...opt, enabled } : opt
+    );
+    await this.update({ ...config, options: updatedOptions });
+  },
+};
+
+// ============================================
 // FUNCIÓN DE MIGRACIÓN COMPLETA
 // ============================================
 

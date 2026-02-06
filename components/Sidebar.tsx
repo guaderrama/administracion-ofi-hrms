@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
+import { menuConfigService, type MenuConfig, type MenuOptionConfig } from '../src/services/firestoreService';
 
 // Componentes de íconos definidos localmente para simplicidad y sin dependencias externas
 const HomeIcon: React.FC<{className?: string}> = ({ className }) => (
@@ -67,6 +68,31 @@ const CloseIcon: React.FC<{className?: string}> = ({ className }) => (
 export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen = true, onClose }) => {
   const [openSection, setOpenSection] = useState<string>('checador');
   const { isAdmin, userData, logout } = useAuth();
+  const [menuConfig, setMenuConfig] = useState<MenuConfig | null>(null);
+
+  // Cargar configuración del menú desde Firestore
+  useEffect(() => {
+    const unsubscribe = menuConfigService.subscribe((config) => {
+      setMenuConfig(config);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Toggle de opción del menú (solo admin)
+  const handleToggleOption = async (optionId: string, currentEnabled: boolean) => {
+    try {
+      await menuConfigService.toggleOption(optionId, !currentEnabled);
+    } catch (error) {
+      console.error('Error al cambiar configuración:', error);
+    }
+  };
+
+  // Filtrar opciones según rol: admin ve todo, empleados solo las habilitadas
+  const getVisibleOptions = (): MenuOptionConfig[] => {
+    if (!menuConfig) return [];
+    if (isAdmin) return menuConfig.options;
+    return menuConfig.options.filter(opt => opt.enabled);
+  };
 
   const handleNavigation = (view: string) => {
     setView(view);
@@ -188,18 +214,51 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
           </Section>
 
           <Section sectionKey="rh" title="Recursos Humanos" icon={<CollectionIcon />}>
-             <NavLink
-                view="rh/permission-generator"
-                label="Permiso Laboral"
-              />
-              <NavLink
-                view="rh/vacation-slip"
-                label="Papeleta de vacaciones"
-              />
-              <NavLink
-                view="rh/loan-request"
-                label="Solicitud de Préstamo"
-              />
+            {getVisibleOptions().map((option) => (
+              <li key={option.id} className="mt-1 flex items-center">
+                <a
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); handleNavigation(option.view); }}
+                  className={`flex-1 group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-150 ${
+                    currentView === option.view
+                      ? 'bg-amber-800 text-white'
+                      : option.enabled || isAdmin
+                        ? 'text-amber-100 hover:bg-amber-900/50 hover:text-white'
+                        : 'text-amber-100/50'
+                  } ${!option.enabled && isAdmin ? 'opacity-50' : ''}`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full mr-3 ${option.enabled ? 'bg-current' : 'bg-red-400'}`}></span>
+                  <span>{option.label}</span>
+                </a>
+                {/* Toggle solo visible para admin */}
+                {isAdmin && (
+                  <button
+                    onClick={() => handleToggleOption(option.id, option.enabled)}
+                    className={`ml-1 p-1 rounded transition-colors ${
+                      option.enabled
+                        ? 'bg-green-600 hover:bg-green-700'
+                        : 'bg-red-600 hover:bg-red-700'
+                    }`}
+                    title={option.enabled ? 'Desactivar para empleados' : 'Activar para empleados'}
+                  >
+                    {option.enabled ? (
+                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+              </li>
+            ))}
+            {getVisibleOptions().length === 0 && !isAdmin && (
+              <li className="mt-1 px-3 py-2 text-sm text-amber-100/50 italic">
+                No hay opciones disponibles
+              </li>
+            )}
           </Section>
 
           {/* Solo mostrar Requisiciones para Admin */}
