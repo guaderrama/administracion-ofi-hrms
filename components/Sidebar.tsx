@@ -233,23 +233,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
                 {/* Toggle solo visible para admin */}
                 {isAdmin && (
                   <button
-                    onClick={() => handleToggleOption(option.id, option.enabled)}
-                    className={`ml-1 p-1 rounded transition-colors ${
+                    onClick={(e) => { e.stopPropagation(); handleToggleOption(option.id, option.enabled); }}
+                    className={`ml-2 px-2 py-1 rounded text-xs font-bold transition-all shadow-sm ${
                       option.enabled
-                        ? 'bg-green-600 hover:bg-green-700'
-                        : 'bg-red-600 hover:bg-red-700'
+                        ? 'bg-green-500 hover:bg-green-600 text-white'
+                        : 'bg-red-500 hover:bg-red-600 text-white'
                     }`}
-                    title={option.enabled ? 'Desactivar para empleados' : 'Activar para empleados'}
+                    title={option.enabled ? 'Click para OCULTAR a empleados' : 'Click para MOSTRAR a empleados'}
                   >
-                    {option.enabled ? (
-                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    )}
+                    {option.enabled ? 'ON' : 'OFF'}
                   </button>
                 )}
               </li>
