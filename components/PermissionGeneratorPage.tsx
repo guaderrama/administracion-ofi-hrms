@@ -24,22 +24,6 @@ export const PermissionGeneratorPage: React.FC = () => {
   const generatePdf = useCallback(async () => {
     if (!permissionData) return;
 
-    // Save the request to localStorage
-    try {
-        const storedRequests = localStorage.getItem('permission_requests');
-        const requests: PermissionRequest[] = storedRequests ? JSON.parse(storedRequests) : [];
-        const newRequest: PermissionRequest = {
-            ...permissionData,
-            id: new Date().toISOString() + '-' + Math.random().toString(36).substr(2, 9),
-            status: 'Pendiente',
-        };
-        requests.push(newRequest);
-        localStorage.setItem('permission_requests', JSON.stringify(requests));
-    } catch (error) {
-        console.error("Error saving permission request:", error);
-    }
-
-
     const content = document.getElementById('pdf-content');
     if (!content) {
         console.error("PDF content element not found");

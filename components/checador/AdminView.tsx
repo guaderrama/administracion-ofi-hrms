@@ -9,7 +9,7 @@ import { DownloadIcon } from './icons/DownloadIcon';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMethodsForEmail } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../../src/firebaseConfig';
-import { employeesService, logsService, permissionsService, schedulesService, migrateAllDataToFirestore, cleanDuplicateLogs } from '../../src/services/firestoreService';
+import { employeesService, logsService, permissionsService, schedulesService, cleanDuplicateLogs } from '../../src/services/firestoreService';
 import { useToast } from '../ui/Toast';
 
 interface AdminViewProps {
@@ -178,9 +178,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
 
   useEffect(() => {
-    // Migrar datos existentes de localStorage a Firestore (solo la primera vez)
-    migrateAllDataToFirestore();
-
     // Suscribirse a cambios en tiempo real desde Firestore
     const unsubscribeLogs = logsService.subscribe((logs) => {
       setAllLogs(logs);

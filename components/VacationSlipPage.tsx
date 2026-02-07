@@ -24,21 +24,6 @@ export const VacationSlipPage: React.FC = () => {
   const generatePdf = useCallback(async () => {
     if (!vacationData) return;
 
-    // Save the request to localStorage
-    try {
-        const storedRequests = localStorage.getItem('vacation_requests');
-        const requests = storedRequests ? JSON.parse(storedRequests) : [];
-        const newRequest = {
-            ...vacationData,
-            id: new Date().toISOString() + '-' + Math.random().toString(36).substr(2, 9),
-        };
-        requests.push(newRequest);
-        localStorage.setItem('vacation_requests', JSON.stringify(requests));
-    } catch (error) {
-        console.error("Error saving vacation request:", error);
-    }
-
-
     const content = document.getElementById('pdf-content-vacation');
     if (!content) {
         console.error("PDF content element not found");

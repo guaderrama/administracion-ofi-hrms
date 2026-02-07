@@ -1,6 +1,7 @@
 
 import React, { useState, useCallback, useMemo } from 'react';
 import type { PermissionRequest, DetailedEmployee } from '../types';
+import { employeesService } from '../src/services/firestoreService';
 import { PermissionType, Reason, Compensation, CompensationMethod } from '../types';
 import { PERMISSION_TYPE_OPTIONS, REASON_OPTIONS, COMPENSATION_OPTIONS, COMPENSATION_METHOD_OPTIONS } from '../constants';
 import { useToast } from './ui/Toast';
@@ -75,7 +76,7 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
   });
 
   // Función para buscar empleado por código
-  const handleCodeSearch = useCallback((code: string) => {
+  const handleCodeSearch = useCallback(async (code: string) => {
     setEmployeeCode(code);
     setCodeError('');
     setEmployeeFound(false);
@@ -93,20 +94,20 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
       return;
     }
 
-    // Buscar en detailed_employees
-    const storedEmployeesStr = localStorage.getItem('detailed_employees');
-    if (!storedEmployeesStr) {
-      setCodeError('No hay empleados registrados en el sistema.');
-      return;
-    }
-
+    // Buscar en Firestore
     let detailedEmployees: DetailedEmployee[] = [];
     try {
-      detailedEmployees = JSON.parse(storedEmployeesStr);
+      detailedEmployees = await employeesService.getAll();
     } catch {
       setCodeError('Error al leer datos de empleados. Recarga la página.');
       return;
     }
+
+    if (detailedEmployees.length === 0) {
+      setCodeError('No hay empleados registrados en el sistema.');
+      return;
+    }
+
     const foundEmployee = detailedEmployees.find(emp => emp.codigo === code);
 
     if (foundEmployee) {

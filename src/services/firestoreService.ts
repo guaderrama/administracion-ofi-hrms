@@ -30,18 +30,11 @@ const EMPLOYEES_COLLECTION = 'detailed_employees';
 export const employeesService = {
   // Obtener todos los empleados
   async getAll(): Promise<DetailedEmployee[]> {
-    try {
-      const querySnapshot = await getDocs(collection(db, EMPLOYEES_COLLECTION));
-      return querySnapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id,
-      })) as DetailedEmployee[];
-    } catch (error) {
-      console.error('Error al obtener empleados:', error);
-      // Fallback a localStorage si Firestore falla
-      const stored = localStorage.getItem('detailed_employees');
-      return stored ? JSON.parse(stored) : [];
-    }
+    const querySnapshot = await getDocs(collection(db, EMPLOYEES_COLLECTION));
+    return querySnapshot.docs.map(doc => ({
+      ...doc.data(),
+      id: doc.id,
+    })) as DetailedEmployee[];
   },
 
   // Obtener empleado por ID
@@ -66,15 +59,7 @@ export const employeesService = {
         ...employee,
         createdAt: Timestamp.now(),
       });
-      const newEmployee = { ...employee, id: docRef.id };
-
-      // También guardar en localStorage como backup
-      const stored = localStorage.getItem('detailed_employees');
-      const employees = stored ? JSON.parse(stored) : [];
-      employees.push(newEmployee);
-      localStorage.setItem('detailed_employees', JSON.stringify(employees));
-
-      return newEmployee;
+      return { ...employee, id: docRef.id };
     } catch (error) {
       console.error('Error al crear empleado:', error);
       throw error;
@@ -89,17 +74,6 @@ export const employeesService = {
         ...data,
         updatedAt: Timestamp.now(),
       });
-
-      // Actualizar localStorage
-      const stored = localStorage.getItem('detailed_employees');
-      if (stored) {
-        const employees = JSON.parse(stored);
-        const index = employees.findIndex((e: DetailedEmployee) => e.id === id);
-        if (index !== -1) {
-          employees[index] = { ...employees[index], ...data };
-          localStorage.setItem('detailed_employees', JSON.stringify(employees));
-        }
-      }
     } catch (error) {
       console.error('Error al actualizar empleado:', error);
       throw error;
@@ -110,14 +84,6 @@ export const employeesService = {
   async delete(id: string): Promise<void> {
     try {
       await deleteDoc(doc(db, EMPLOYEES_COLLECTION, id));
-
-      // Eliminar de localStorage
-      const stored = localStorage.getItem('detailed_employees');
-      if (stored) {
-        const employees = JSON.parse(stored);
-        const filtered = employees.filter((e: DetailedEmployee) => e.id !== id);
-        localStorage.setItem('detailed_employees', JSON.stringify(filtered));
-      }
     } catch (error) {
       console.error('Error al eliminar empleado:', error);
       throw error;
@@ -134,8 +100,6 @@ export const employeesService = {
           id: doc.id,
         })) as DetailedEmployee[];
 
-        // Actualizar localStorage
-        localStorage.setItem('detailed_employees', JSON.stringify(employees));
         callback(employees);
       },
       (error) => {
@@ -145,33 +109,6 @@ export const employeesService = {
     return unsubscribe;
   },
 
-  // Sincronizar localStorage con Firestore (migración inicial)
-  async syncFromLocalStorage(): Promise<void> {
-    try {
-      const stored = localStorage.getItem('detailed_employees');
-      if (!stored) return;
-
-      const localEmployees: DetailedEmployee[] = JSON.parse(stored);
-      const batch = writeBatch(db);
-
-      for (const emp of localEmployees) {
-        const docRef = doc(db, EMPLOYEES_COLLECTION, emp.id);
-        const docSnap = await getDoc(docRef);
-
-        if (!docSnap.exists()) {
-          batch.set(docRef, {
-            ...emp,
-            syncedAt: Timestamp.now(),
-          });
-        }
-      }
-
-      await batch.commit();
-      console.log('Empleados sincronizados con Firestore');
-    } catch (error) {
-      console.error('Error al sincronizar empleados:', error);
-    }
-  },
 };
 
 // ============================================
@@ -183,19 +120,13 @@ const LOGS_COLLECTION = 'attendance_logs';
 export const logsService = {
   // Obtener todos los logs
   async getAll(): Promise<LogEntry[]> {
-    try {
-      const querySnapshot = await getDocs(
-        query(collection(db, LOGS_COLLECTION), orderBy('timestamp', 'desc'))
-      );
-      return querySnapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id,
-      })) as LogEntry[];
-    } catch (error) {
-      console.error('Error al obtener logs:', error);
-      const stored = localStorage.getItem('all_employee_logs');
-      return stored ? JSON.parse(stored) : [];
-    }
+    const querySnapshot = await getDocs(
+      query(collection(db, LOGS_COLLECTION), orderBy('timestamp', 'desc'))
+    );
+    return querySnapshot.docs.map(doc => ({
+      ...doc.data(),
+      id: doc.id,
+    })) as LogEntry[];
   },
 
   // Obtener logs por rango de fechas
@@ -270,12 +201,6 @@ export const logsService = {
         ...log,
         createdAt: Timestamp.now(),
       });
-
-      // También guardar en localStorage
-      const stored = localStorage.getItem('all_employee_logs');
-      const logs = stored ? JSON.parse(stored) : [];
-      logs.push(log);
-      localStorage.setItem('all_employee_logs', JSON.stringify(logs));
     } catch (error) {
       console.error('Error al crear log:', error);
       throw error;
@@ -292,17 +217,6 @@ export const logsService = {
         ...updateData,
         updatedAt: Timestamp.now(),
       });
-
-      // Actualizar localStorage
-      const stored = localStorage.getItem('all_employee_logs');
-      if (stored) {
-        const logs = JSON.parse(stored);
-        const index = logs.findIndex((l: LogEntry) => l.id === logId);
-        if (index !== -1) {
-          logs[index] = { ...logs[index], ...updateData };
-          localStorage.setItem('all_employee_logs', JSON.stringify(logs));
-        }
-      }
     } catch (error) {
       console.error('Error al actualizar log:', error);
       throw error;
@@ -313,14 +227,6 @@ export const logsService = {
   async delete(logId: string): Promise<void> {
     try {
       await deleteDoc(doc(db, LOGS_COLLECTION, logId));
-
-      // Eliminar de localStorage
-      const stored = localStorage.getItem('all_employee_logs');
-      if (stored) {
-        const logs = JSON.parse(stored);
-        const filtered = logs.filter((l: LogEntry) => l.id !== logId);
-        localStorage.setItem('all_employee_logs', JSON.stringify(filtered));
-      }
     } catch (error) {
       console.error('Error al eliminar log:', error);
       throw error;
@@ -336,7 +242,6 @@ export const logsService = {
           ...doc.data(),
           id: doc.id,
         })) as LogEntry[];
-        localStorage.setItem('all_employee_logs', JSON.stringify(logs));
         callback(logs);
       },
       (error) => {
@@ -346,66 +251,6 @@ export const logsService = {
     return unsubscribe;
   },
 
-  // Sincronizar localStorage con Firestore (solo una vez)
-  async syncFromLocalStorage(): Promise<void> {
-    try {
-      // Verificar si ya se sincronizó anteriormente
-      const alreadySynced = localStorage.getItem('logs_synced_to_firestore');
-      if (alreadySynced === 'true') {
-        console.log('Logs ya fueron sincronizados previamente');
-        return;
-      }
-
-      const stored = localStorage.getItem('all_employee_logs');
-      if (!stored) return;
-
-      const localLogs: LogEntry[] = JSON.parse(stored);
-      if (localLogs.length === 0) return;
-
-      // Obtener logs existentes en Firestore para evitar duplicados
-      const existingLogs = await getDocs(collection(db, LOGS_COLLECTION));
-      const existingTimestamps = new Set(
-        existingLogs.docs.map(doc => doc.data().timestamp)
-      );
-
-      // Filtrar solo logs que no existen en Firestore
-      const newLogs = localLogs.filter(log => !existingTimestamps.has(log.timestamp));
-
-      if (newLogs.length === 0) {
-        console.log('No hay logs nuevos para sincronizar');
-        localStorage.setItem('logs_synced_to_firestore', 'true');
-        return;
-      }
-
-      const batch = writeBatch(db);
-      let count = 0;
-
-      for (const log of newLogs) {
-        const docRef = doc(collection(db, LOGS_COLLECTION));
-        batch.set(docRef, {
-          ...log,
-          syncedAt: Timestamp.now(),
-        });
-        count++;
-
-        // Firestore batch tiene límite de 500 operaciones
-        if (count >= 450) {
-          await batch.commit();
-          count = 0;
-        }
-      }
-
-      if (count > 0) {
-        await batch.commit();
-      }
-
-      // Marcar como sincronizado para no repetir
-      localStorage.setItem('logs_synced_to_firestore', 'true');
-      console.log(`${newLogs.length} logs sincronizados con Firestore`);
-    } catch (error) {
-      console.error('Error al sincronizar logs:', error);
-    }
-  },
 };
 
 // ============================================
@@ -417,17 +262,11 @@ const PERMISSIONS_COLLECTION = 'permission_requests';
 export const permissionsService = {
   // Obtener todas las solicitudes
   async getAll(): Promise<PermissionRequest[]> {
-    try {
-      const querySnapshot = await getDocs(collection(db, PERMISSIONS_COLLECTION));
-      return querySnapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id,
-      })) as PermissionRequest[];
-    } catch (error) {
-      console.error('Error al obtener permisos:', error);
-      const stored = localStorage.getItem('permission_requests');
-      return stored ? JSON.parse(stored) : [];
-    }
+    const querySnapshot = await getDocs(collection(db, PERMISSIONS_COLLECTION));
+    return querySnapshot.docs.map(doc => ({
+      ...doc.data(),
+      id: doc.id,
+    })) as PermissionRequest[];
   },
 
   // Crear nueva solicitud
@@ -437,15 +276,7 @@ export const permissionsService = {
         ...request,
         createdAt: Timestamp.now(),
       });
-      const newRequest = { ...request, id: docRef.id };
-
-      // También guardar en localStorage
-      const stored = localStorage.getItem('permission_requests');
-      const requests = stored ? JSON.parse(stored) : [];
-      requests.push(newRequest);
-      localStorage.setItem('permission_requests', JSON.stringify(requests));
-
-      return newRequest as PermissionRequest;
+      return { ...request, id: docRef.id } as PermissionRequest;
     } catch (error) {
       console.error('Error al crear permiso:', error);
       throw error;
@@ -460,17 +291,6 @@ export const permissionsService = {
         ...data,
         updatedAt: Timestamp.now(),
       });
-
-      // Actualizar localStorage
-      const stored = localStorage.getItem('permission_requests');
-      if (stored) {
-        const requests = JSON.parse(stored);
-        const index = requests.findIndex((r: PermissionRequest) => r.id === id);
-        if (index !== -1) {
-          requests[index] = { ...requests[index], ...data };
-          localStorage.setItem('permission_requests', JSON.stringify(requests));
-        }
-      }
     } catch (error) {
       console.error('Error al actualizar permiso:', error);
       throw error;
@@ -487,7 +307,6 @@ export const permissionsService = {
           id: doc.id,
         })) as PermissionRequest[];
 
-        localStorage.setItem('permission_requests', JSON.stringify(requests));
         callback(requests);
       },
       (error) => {
@@ -497,33 +316,6 @@ export const permissionsService = {
     return unsubscribe;
   },
 
-  // Sincronizar localStorage con Firestore
-  async syncFromLocalStorage(): Promise<void> {
-    try {
-      const stored = localStorage.getItem('permission_requests');
-      if (!stored) return;
-
-      const localRequests: PermissionRequest[] = JSON.parse(stored);
-      const batch = writeBatch(db);
-
-      for (const req of localRequests) {
-        const docRef = doc(db, PERMISSIONS_COLLECTION, req.id);
-        const docSnap = await getDoc(docRef);
-
-        if (!docSnap.exists()) {
-          batch.set(docRef, {
-            ...req,
-            syncedAt: Timestamp.now(),
-          });
-        }
-      }
-
-      await batch.commit();
-      console.log('Permisos sincronizados con Firestore');
-    } catch (error) {
-      console.error('Error al sincronizar permisos:', error);
-    }
-  },
 };
 
 // ============================================
@@ -535,18 +327,12 @@ const SCHEDULES_COLLECTION = 'employee_schedules';
 export const schedulesService = {
   // Obtener todos los horarios
   async getAll(): Promise<Record<string, any>> {
-    try {
-      const docRef = doc(db, SCHEDULES_COLLECTION, 'config');
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        return docSnap.data().schedules || {};
-      }
-      return {};
-    } catch (error) {
-      console.error('Error al obtener horarios:', error);
-      const stored = localStorage.getItem('employee_schedules');
-      return stored ? JSON.parse(stored) : {};
+    const docRef = doc(db, SCHEDULES_COLLECTION, 'config');
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data().schedules || {};
     }
+    return {};
   },
 
   // Guardar horarios
@@ -557,9 +343,6 @@ export const schedulesService = {
         schedules,
         updatedAt: Timestamp.now(),
       });
-
-      // También guardar en localStorage
-      localStorage.setItem('employee_schedules', JSON.stringify(schedules));
     } catch (error) {
       console.error('Error al guardar horarios:', error);
       throw error;
@@ -574,7 +357,6 @@ export const schedulesService = {
       (docSnap) => {
         if (docSnap.exists()) {
           const schedules = docSnap.data().schedules || {};
-          localStorage.setItem('employee_schedules', JSON.stringify(schedules));
           callback(schedules);
         }
       },
@@ -611,25 +393,17 @@ export const incomesService = {
 
   // Obtener ingresos por empleado
   async getByEmployee(employeeName: string): Promise<IncomeEntry[]> {
-    try {
-      const querySnapshot = await getDocs(
-        query(
-          collection(db, INCOMES_COLLECTION),
-          where('employeeName', '==', employeeName),
-          orderBy('paymentDate', 'desc')
-        )
-      );
-      return querySnapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id,
-      })) as IncomeEntry[];
-    } catch (error) {
-      console.error('Error al obtener ingresos por empleado:', error);
-      // Fallback a localStorage
-      const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
-      const stored = localStorage.getItem(key);
-      return stored ? JSON.parse(stored) : [];
-    }
+    const querySnapshot = await getDocs(
+      query(
+        collection(db, INCOMES_COLLECTION),
+        where('employeeName', '==', employeeName),
+        orderBy('paymentDate', 'desc')
+      )
+    );
+    return querySnapshot.docs.map(doc => ({
+      ...doc.data(),
+      id: doc.id,
+    })) as IncomeEntry[];
   },
 
   // Crear nuevo ingreso
@@ -639,16 +413,7 @@ export const incomesService = {
         ...income,
         createdAt: Timestamp.now(),
       });
-      const newIncome = { ...income, id: docRef.id };
-
-      // También guardar en localStorage como backup
-      const key = `incomes_${income.employeeName.replace(/\s+/g, '_')}`;
-      const stored = localStorage.getItem(key);
-      const incomes = stored ? JSON.parse(stored) : [];
-      incomes.push(newIncome);
-      localStorage.setItem(key, JSON.stringify(incomes));
-
-      return newIncome as IncomeEntry;
+      return { ...income, id: docRef.id } as IncomeEntry;
     } catch (error) {
       console.error('Error al crear ingreso:', error);
       throw error;
@@ -664,20 +429,6 @@ export const incomesService = {
         ...updateData,
         updatedAt: Timestamp.now(),
       });
-
-      // Actualizar localStorage
-      if (data.employeeName) {
-        const key = `incomes_${data.employeeName.replace(/\s+/g, '_')}`;
-        const stored = localStorage.getItem(key);
-        if (stored) {
-          const incomes = JSON.parse(stored);
-          const index = incomes.findIndex((i: IncomeEntry) => i.id === incomeId);
-          if (index !== -1) {
-            incomes[index] = { ...incomes[index], ...updateData };
-            localStorage.setItem(key, JSON.stringify(incomes));
-          }
-        }
-      }
     } catch (error) {
       console.error('Error al actualizar ingreso:', error);
       throw error;
@@ -688,15 +439,6 @@ export const incomesService = {
   async delete(incomeId: string, employeeName: string): Promise<void> {
     try {
       await deleteDoc(doc(db, INCOMES_COLLECTION, incomeId));
-
-      // Eliminar de localStorage
-      const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        const incomes = JSON.parse(stored);
-        const filtered = incomes.filter((i: IncomeEntry) => i.id !== incomeId);
-        localStorage.setItem(key, JSON.stringify(filtered));
-      }
     } catch (error) {
       console.error('Error al eliminar ingreso:', error);
       throw error;
@@ -717,9 +459,6 @@ export const incomesService = {
           id: doc.id,
         })) as IncomeEntry[];
 
-        // Actualizar localStorage
-        const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
-        localStorage.setItem(key, JSON.stringify(incomes));
         callback(incomes);
       },
       (error) => {
@@ -729,54 +468,6 @@ export const incomesService = {
     return unsubscribe;
   },
 
-  // Migrar ingresos de localStorage a Firestore (una sola vez)
-  async syncFromLocalStorage(employeeName: string): Promise<void> {
-    try {
-      const syncKey = `incomes_synced_${employeeName.replace(/\s+/g, '_')}`;
-      if (localStorage.getItem(syncKey) === 'true') return;
-
-      const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
-      const stored = localStorage.getItem(key);
-      if (!stored) {
-        localStorage.setItem(syncKey, 'true');
-        return;
-      }
-
-      const localIncomes: IncomeEntry[] = JSON.parse(stored);
-      if (localIncomes.length === 0) {
-        localStorage.setItem(syncKey, 'true');
-        return;
-      }
-
-      // Verificar qué ingresos ya existen en Firestore
-      const existingIncomes = await this.getByEmployee(employeeName);
-      const existingIds = new Set(existingIncomes.map(i => i.id));
-
-      const batch = writeBatch(db);
-      let count = 0;
-
-      for (const income of localIncomes) {
-        if (!existingIds.has(income.id)) {
-          const docRef = doc(collection(db, INCOMES_COLLECTION));
-          batch.set(docRef, {
-            ...income,
-            syncedAt: Timestamp.now(),
-          });
-          count++;
-        }
-      }
-
-      if (count > 0) {
-        await batch.commit();
-        console.log(`${count} ingresos de ${employeeName} sincronizados con Firestore`);
-      }
-
-      // Marcar como sincronizado para no repetir
-      localStorage.setItem(syncKey, 'true');
-    } catch (error) {
-      console.error('Error al sincronizar ingresos:', error);
-    }
-  },
 };
 
 // ============================================
@@ -871,30 +562,6 @@ export const menuConfigService = {
     );
     await this.update({ ...config, options: updatedOptions });
   },
-};
-
-// ============================================
-// FUNCIÓN DE MIGRACIÓN COMPLETA
-// ============================================
-
-export const migrateAllDataToFirestore = async (): Promise<void> => {
-  console.log('Iniciando migración de datos a Firestore...');
-
-  try {
-    await employeesService.syncFromLocalStorage();
-    await logsService.syncFromLocalStorage();
-    await permissionsService.syncFromLocalStorage();
-
-    // Migrar horarios
-    const storedSchedules = localStorage.getItem('employee_schedules');
-    if (storedSchedules) {
-      await schedulesService.save(JSON.parse(storedSchedules));
-    }
-
-    console.log('Migración completada exitosamente');
-  } catch (error) {
-    console.error('Error durante la migración:', error);
-  }
 };
 
 // ============================================

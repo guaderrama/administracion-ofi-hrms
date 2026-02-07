@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { DetailedEmployee } from '@/types';
+import { employeesService } from '../src/services/firestoreService';
 import { Card } from './ui/Card';
 
 // Icons
@@ -55,10 +56,8 @@ export const DashboardPage: React.FC = () => {
     const [employees, setEmployees] = useState<DetailedEmployee[]>([]);
 
     useEffect(() => {
-        const storedEmployees = localStorage.getItem('detailed_employees');
-        if (storedEmployees) {
-            setEmployees(JSON.parse(storedEmployees));
-        }
+        const unsubscribe = employeesService.subscribe((emps) => setEmployees(emps));
+        return () => unsubscribe();
     }, []);
 
     const today = new Date();

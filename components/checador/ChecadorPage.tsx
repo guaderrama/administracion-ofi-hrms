@@ -153,24 +153,11 @@ export const ChecadorPage: React.FC = () => {
         return [];
     }, [user, isAdmin, syncedEmployees, detailedEmployees]);
 
-    const getTodayKey = (employeeName: string) => {
-        const today = new Date().toISOString().slice(0, 10);
-        return `logs_${employeeName.replace(/\s+/g, '_')}_${today}`;
-    };
-
-    const getIncomesKey = (employeeName: string) => {
-        return `incomes_${employeeName.replace(/\s+/g, '_')}`;
-    };
-    
     const loadDailyLogs = useCallback(async (employee: Employee) => {
         try {
-            // Cargar desde Firestore (datos sincronizados entre dispositivos)
+            // Cargar desde Firestore (fuente de verdad)
             const logs = await logsService.getByEmployeeAndDate(employee.name);
             setDailyLogs(logs);
-
-            // Actualizar localStorage como cache local
-            const key = getTodayKey(employee.name);
-            localStorage.setItem(key, JSON.stringify(logs));
 
             // Determinar estado del reloj basado en el último registro
             const lastLog = logs[logs.length - 1];
@@ -194,60 +181,24 @@ export const ChecadorPage: React.FC = () => {
             }
         } catch (error) {
             console.error('Error al cargar registros desde Firestore:', error);
-            // Fallback a localStorage si Firestore falla
-            const key = getTodayKey(employee.name);
-            const storedLogs = localStorage.getItem(key);
-            let logs: LogEntry[] = [];
-            try {
-                logs = storedLogs ? JSON.parse(storedLogs) : [];
-            } catch {
-                // localStorage corrupto, usar array vacío
-                localStorage.removeItem(key);
-            }
-            setDailyLogs(logs);
+            setDailyLogs([]);
         }
     }, []);
     
     const loadIncomes = useCallback(async (employee: Employee) => {
         try {
-            // Migrar datos de localStorage a Firestore (solo la primera vez)
-            await incomesService.syncFromLocalStorage(employee.name);
             // Cargar desde Firestore (fuente de verdad)
             const loadedIncomes = await incomesService.getByEmployee(employee.name);
             setIncomes(loadedIncomes);
-
-            // Actualizar localStorage para que refleje Firestore
-            const key = getIncomesKey(employee.name);
-            localStorage.setItem(key, JSON.stringify(loadedIncomes));
         } catch (error) {
             console.error('Error al cargar ingresos:', error);
-            // Fallback a localStorage solo si Firestore falla
-            const key = getIncomesKey(employee.name);
-            const storedIncomes = localStorage.getItem(key);
-            let loadedIncomes: IncomeEntry[] = [];
-            try {
-                loadedIncomes = storedIncomes ? JSON.parse(storedIncomes) : [];
-            } catch {
-                localStorage.removeItem(key);
-            }
-            setIncomes(loadedIncomes);
+            setIncomes([]);
         }
     }, []);
 
-    const loadOwedHours = useCallback((employee: Employee) => {
-        const storedOwedHours = localStorage.getItem('employee_owed_hours');
-        if (storedOwedHours) {
-            try {
-                const allOwedHours = JSON.parse(storedOwedHours);
-                setOwedHours(allOwedHours[employee.name] || 0);
-            } catch {
-                // localStorage corrupto
-                localStorage.removeItem('employee_owed_hours');
-                setOwedHours(0);
-            }
-        } else {
-            setOwedHours(0);
-        }
+    const loadOwedHours = useCallback((_employee: Employee) => {
+        // TODO: Migrar owed hours a Firestore cuando se implemente el servicio
+        setOwedHours(0);
     }, []);
 
     useEffect(() => {
@@ -314,16 +265,11 @@ export const ChecadorPage: React.FC = () => {
         };
 
         try {
-            // Guardar en Firestore (también actualiza localStorage como backup)
+            // Guardar en Firestore (fuente de verdad)
             await logsService.create(newLog);
 
-            // Guardar en log diario (localStorage para vista rápida)
-            const key = getTodayKey(authenticatedEmployee.name);
-            const updatedLogs = [...dailyLogs, newLog];
-            localStorage.setItem(key, JSON.stringify(updatedLogs));
-
-            setDailyLogs(updatedLogs);
-            loadDailyLogs(authenticatedEmployee); // Recargar para actualizar status
+            // Recargar desde Firestore para actualizar estado
+            loadDailyLogs(authenticatedEmployee);
         } catch (error) {
             console.error('Error al guardar registro:', error);
             toast.error('Error al guardar registro. Intenta de nuevo.');
