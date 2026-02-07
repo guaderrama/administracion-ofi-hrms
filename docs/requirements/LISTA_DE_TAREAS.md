@@ -1,86 +1,122 @@
-Como Tech Lead, he estructurado la implementación para escalar tu prototipo visual a una aplicación robusta utilizando Firebase.
+# Lista de Tareas - HRMS "Cerebro Central"
 
-Aquí tienes la arquitectura técnica y el checklist de ejecución dividido por capas.
-
-### Arquitectura de Datos (Firestore Schema Strategy)
-
-Antes de programar, definimos la estructura de la base de datos NoSQL para soportar las "3 Carpetas Digitales":
-
-1.  **Colección `employees` (Expediente Maestro):**
-    *   `uid` (ID único de Auth), `fullName`, `role` (admin/employee), `photoURL`, `position`, `dateHired`.
-2.  **Colección `attendance` (Bitácora de Tiempo):**
-    *   Documento por evento o por día. *Recomendación:* Un documento por día por empleado.
-    *   Campos: `employeeId`, `date` (YYYY-MM-DD), `checkInTime` (Timestamp), `checkOutTime` (Timestamp), `hoursWorked` (Number), `status` (open/closed).
-3.  **Colección `requests` (Buzón de Permisos):**
-    *   `employeeId`, `type` (vacation/sick_leave), `startDate`, `endDate`, `status` (pending/approved/rejected), `reason`.
+**Ultima Actualizacion:** 2026-02-06
 
 ---
 
-### 🟢 PART 1: BACKEND (Firebase & Logic)
-*El "Motor" invisible. Se configura en la Consola de Firebase y mediante Cloud Functions.*
+## ✅ COMPLETADO
 
-#### 1. Configuración del Núcleo
-- [ ] **Crear Proyecto Firebase:** Configurar nuevo proyecto en la consola de Google Firebase.
-- [ ] **Habilitar Firestore:** Crear base de datos en modo "Producción" (empezaremos con reglas estrictas).
-- [ ] **Habilitar Authentication:** Activar proveedor "Email/Password".
-    - [ ] *Elite Tip:* Habilitar también Google Auth para facilitar el acceso rápido si tienen correos corporativos.
+### Fase 1: Fundacion (Backend Setup)
+- [x] Crear proyecto en Firebase Console
+- [x] Habilitar Authentication (Email/Password)
+- [x] Habilitar Firestore Database
+- [x] Instalar SDK Firebase en proyecto React
+- [x] Crear archivo `firebaseConfig.ts`
+- [x] Configurar Firebase Hosting
+- [x] Deploy inicial a produccion
 
-#### 2. Seguridad y Reglas (Firestore Security Rules)
-- [ ] **Definir RBAC (Role-Based Access Control):**
-    - [ ] Crear regla: Solo usuarios con `request.auth.token.role == 'admin'` pueden *crear* o *borrar* empleados.
-    - [ ] Crear regla: Empleados solo pueden *leer/escribir* en sus propios documentos de `attendance` y `requests`.
-    - [ ] Crear regla: Empleados NO pueden modificar el campo `hoursWorked` (eso lo hace el servidor).
+### Fase 2: Autenticacion y Perfiles
+- [x] Crear AuthContext para manejar sesion global
+- [x] Pantalla de Login con Email/Password
+- [x] Registro de nuevos usuarios
+- [x] Restablecimiento de contrasena
+- [x] Asignacion automatica de admin al primer usuario
+- [x] Control de acceso basado en roles (RBAC)
+- [x] Proteccion de rutas admin-only
 
-#### 3. Cloud Functions (Lógica de Negocio)
-*Instalar Firebase CLI para desplegar estas funciones.*
-- [ ] **Trigger: Cálculo de Horas (onUpdate `attendance`):**
-    - [ ] Cuando se detecta que `checkOutTime` ha sido llenado:
-        1. Calcular la diferencia entre `checkInTime` y `checkOutTime`.
-        2. Escribir el resultado en el campo `hoursWorked`.
-        3. *Esto evita que el frontend manipule las horas calculadas.*
-- [ ] **Trigger: Creación de Usuario (onCreate `auth`):**
-    - [ ] Cuando se crea un usuario en Auth, crear automáticamente su documento "esqueleto" en la colección `employees`.
-- [ ] **API Endpoint (Opcional): Generar Reporte:**
-    - [ ] Función HTTPS que recibe un rango de fechas y devuelve el JSON consolidado para el Admin (más eficiente que consultar miles de documentos desde el frontend).
+### Fase 3: Gestion de Empleados
+- [x] Formulario de alta de colaboradores detallados
+- [x] Campos: codigo, nombres, apellidos, fecha ingreso, departamento, puesto
+- [x] Campos de compensacion: bono puntualidad, bono objetivos, apoyo gasolina
+- [x] Listado de personal desde Firestore (tiempo real)
+- [x] Edicion de datos de empleados
+- [x] Sincronizacion cross-device
+
+### Fase 4: Reloj Checador
+- [x] Modulo de registro de asistencia
+- [x] Registro de entrada/salida
+- [x] Eliminacion de PIN (acceso simplificado)
+- [x] Persistencia en Firestore
+- [x] Historial de registros
+
+### Fase 5: Recursos Humanos
+- [x] Generador de Permisos laborales con PDF
+- [x] Papeleta de Vacaciones con PDF
+- [x] Auto-llenado por codigo de empleado en Papeleta de Vacaciones
+- [x] Calculo automatico de dias de vacaciones (LFT 2023)
+- [x] Seleccion de fechas individuales y por periodo
+- [x] Exclusion de domingos y opcion de excluir sabados
+- [x] Solicitud de Prestamo con PDF
+- [x] Toggle de visibilidad de opciones RH (admin controla que ven empleados)
+- [x] Persistencia de configuracion de menu en Firestore
+
+### Fase 6: Nominas
+- [x] Pagina independiente admin-only
+- [x] Selector de periodo (ano, mes, quincena)
+- [x] Tabla de empleados con calculo de nomina
+- [x] Columnas de vacaciones (dias correspondientes, aplica, fecha ingreso)
+- [x] Generacion de recibo PDF individual
+- [x] Generacion masiva de recibos PDF
+- [x] Vista previa de recibo en pantalla
+- [x] Fila de totales generales
+
+### Fase 7: Seguridad
+- [x] Firestore Security Rules para todas las colecciones
+- [x] Reglas para users, detailed_employees, attendance_logs
+- [x] Reglas para permission_requests, employee_schedules, incomes
+- [x] Reglas para menu_config
+- [x] Reglas para colecciones legacy (attendance, requests, employees)
+- [x] Eliminacion de API key expuesta (GEMINI_API_KEY)
+- [x] Eliminacion de contrasena hardcodeada
+- [x] Proteccion de JSON.parse
+
+### Fase 8: UI/UX
+- [x] Diseno responsivo (mobile + desktop)
+- [x] Sidebar con navegacion por secciones
+- [x] Iconos SVG personalizados
+- [x] Estilo glassmorphism con Tailwind CSS
 
 ---
 
-### 🔵 PART 2: FRONTEND (React Integration)
-*La "Puerta de Entrada" que ya tienes, ahora conectada.*
+## 🔲 PENDIENTE
 
-#### 1. Infraestructura e Instalación
-- [ ] **Instalar SDK:** Agregar `firebase` al proyecto (`npm install firebase`).
-- [ ] **Configuración:** Crear archivo `firebaseConfig.ts` con las credenciales del proyecto y exportar `auth` y `db` (Firestore).
-- [ ] **Contexto de Autenticación:**
-    - [ ] Crear un `AuthContext` en React para manejar la sesión global (saber si el usuario está logueado y si es Admin).
-    - [ ] Proteger rutas: Si no hay usuario, redirigir a Login.
+### Mejoras de Nomina
+- [ ] Agregar campo de sueldo base separado
+- [ ] Implementar deducciones (ISR, IMSS, Infonavit)
+- [ ] Prima vacacional
+- [ ] Aguinaldo
 
-#### 2. Módulo A: Gestión de Empleados (Admin View)
-- [ ] **Formulario de Alta:** Conectar el formulario actual a la función `createUserWithEmailAndPassword` de Firebase.
-- [ ] **Subida de Fotos:** Implementar Firebase Storage para guardar la foto de perfil y obtener la URL para guardarla en Firestore.
-- [ ] **Listado de Personal:** Reemplazar los datos *hardcoded* por un `useEffect` que haga un `getDocs(collection(db, 'employees'))`.
+### Backend / Cloud Functions
+- [ ] Cloud Function para calculo de horas de asistencia (anti-fraude)
+- [ ] Cloud Function para cierre automatico de sesiones abiertas
+- [ ] Trigger onCreate para perfil de usuario automatico
 
-#### 3. Módulo B: Reloj Checador (Employee View)
-- [ ] **Lógica de Entrada:**
-    - [ ] Botón "Entrada": Crea un documento en `attendance` con `checkInTime: serverTimestamp()` (usar timestamp del servidor evita fraudes cambiando la hora del PC).
-- [ ] **Lógica de Salida:**
-    - [ ] Botón "Salida": Busca el documento "abierto" de hoy y hace un `updateDoc` con `checkOutTime: serverTimestamp()`.
-- [ ] **Estado Visual:** Determinar si mostrar botón "Entrada" o "Salida" basándose en si existe un registro abierto para el día actual.
+### Reportes
+- [ ] Reporte mensual de asistencia exportable
+- [ ] Reporte de nomina consolidado por periodo
+- [ ] Exportacion a Excel/CSV
 
-#### 4. Módulo C: Reportes y Permisos
-- [ ] **Envío de Solicitudes:** Formulario que hace `addDoc` a la colección `requests`.
-- [ ] **Dashboard Admin:**
-    - [ ] Conectar `Chart.js` (que ya tienes) para leer de la colección `attendance`.
-    - [ ] Filtrar datos por mes.
-- [ ] **Generación PDF:** Modificar la función actual de `jspdf` para que espere a que los datos asíncronos de Firebase carguen antes de "tomar la foto" del PDF.
+### Notificaciones
+- [ ] Notificaciones push para solicitudes pendientes
+- [ ] Alertas de cumpleanos/aniversarios de empleados
 
-### 🚀 Orden de Ejecución Recomendado
+### Vacaciones Avanzado
+- [ ] Historial de vacaciones tomadas por empleado
+- [ ] Saldo de dias disponibles vs tomados
+- [ ] Aprobacion/rechazo de solicitudes por admin
 
-1.  **Backend:** Configura Firebase y Auth primero. Sin esto, el frontend no tiene a dónde conectarse.
-2.  **Frontend (Auth):** Logra que puedas iniciar sesión.
-3.  **Frontend (Alta):** Logra crear un empleado.
-4.  **Frontend (Reloj):** Logra marcar entrada/salida.
-5.  **Backend (Functions):** Implementa el cálculo automático de horas.
-6.  **Frontend (Reportes):** Visualiza los datos.
+### Calidad
+- [ ] Tests unitarios (Vitest)
+- [ ] Tests de integracion
+- [ ] CI/CD con GitHub Actions
+- [ ] Linting automatizado en pipeline
 
-¿Te gustaría que te genere el código del archivo de configuración de Firebase (`firebaseConfig.ts`) y el Contexto de Autenticación para empezar?
+### Optimizacion
+- [ ] Code splitting / Lazy loading
+- [ ] Optimizacion de imagenes
+- [ ] Paginacion en tablas grandes
+- [ ] Indices de Firestore para queries complejas
+
+---
+
+*Documento actualizado conforme se completan tareas. Ver PRD para especificaciones detalladas.*

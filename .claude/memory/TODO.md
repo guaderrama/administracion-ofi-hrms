@@ -1,129 +1,71 @@
-# TODO List
+# TODO List - HRMS "Cerebro Central"
 
-> Mantén esta lista actualizada al final de cada sesión
+> Ultima Actualizacion: 2026-02-06
 
 ---
 
-## 🔥 High Priority (Esta Semana)
+## 🔥 High Priority (Proxima Sesion)
 
-- [ ] Implementar autenticación básica
-  - Login con email/password
-  - Registro de usuarios
-  - Verificación de email
-- [ ] Configurar base de datos
-  - Crear schema inicial
-  - Setup de migrations
-  - Seed data
-- [ ] Setup de CI/CD
-  - GitHub Actions
-  - Linting pipeline
-  - Tests automáticos
+- [ ] Verificar que toggles de menu RH funcionan correctamente en produccion
+- [ ] Probar generacion de recibos de nomina con datos reales
+- [ ] Revisar si se necesita sueldo base separado en nomina
 
 ---
 
 ## 📋 Medium Priority (Este Mes)
 
-- [ ] Agregar tests unitarios
-  - Components tests
-  - API endpoints tests
-  - Integration tests
-- [ ] Documentar API endpoints
-  - OpenAPI spec
-  - Ejemplos de uso
-  - Error codes
-- [ ] Implementar rate limiting
-  - Por IP
-  - Por API key
-  - Redis cache
+- [ ] Implementar deducciones en nomina (ISR, IMSS, Infonavit)
+- [ ] Agregar prima vacacional y aguinaldo
+- [ ] Historial de vacaciones tomadas por empleado
+- [ ] Aprobacion/rechazo de solicitudes de vacaciones por admin
+- [ ] Reportes de asistencia mensual exportables (PDF/CSV)
 
 ---
 
 ## 💡 Low Priority (Backlog)
 
-- [ ] Optimizar performance
-  - Code splitting
-  - Image optimization
-  - Lazy loading
-- [ ] Agregar analytics
-  - Google Analytics
-  - Event tracking
-  - User behavior
-- [ ] Implementar i18n
-  - Spanish
-  - English
-  - French
+- [ ] Cloud Functions para calculo de horas (anti-fraude con serverTimestamp)
+- [ ] Cloud Function cierre automatico de sesiones abiertas
+- [ ] Notificaciones push para solicitudes pendientes
+- [ ] Code splitting / Lazy loading
+- [ ] Tests unitarios (Vitest)
+- [ ] CI/CD con GitHub Actions
+- [ ] Subida de fotos de empleados a Cloud Storage
+- [ ] Exportacion a Excel/CSV
 
 ---
 
-## ✅ Completed (Esta Semana)
+## ✅ Completed (Reciente)
 
-- [x] Setup inicial del proyecto
-  - Completado: 2025-11-03
-- [x] Configuración de .claude/
-  - Completado: 2025-11-03
-- [x] Instalación de dependencias
-  - Completado: 2025-11-03
+- [x] **Nominas** - Pagina admin-only con tabla, selector de periodo, PDFs (2026-02-06)
+- [x] **Vacaciones en Nominas** - Columnas fecha ingreso, dias vacaciones, aplica (2026-02-06)
+- [x] **Auto-llenado Vacaciones** - Busqueda por codigo de empleado en Papeleta (2026-02-06)
+- [x] **Toggle Menu RH** - Admin activa/desactiva opciones para empleados (2026-02-06)
+- [x] **Firestore Rules menu_config** - Reglas de seguridad para coleccion menu_config (2026-02-06)
+- [x] **Eliminacion de PIN** - Checador sin PIN requerido (2026-02-05)
+- [x] **Password Reset** - Funcionalidad de restablecimiento de contrasena (2026-02-05)
+- [x] **Security Fixes** - Eliminacion GEMINI_API_KEY, contrasena hardcodeada, JSON.parse (2026-02-05)
+- [x] **Mobile Responsive** - Diseno responsivo para movil y desktop (2026-02-05)
+- [x] **Firestore Index Fix** - Simplificacion de indices (2026-02-05)
 
 ---
 
-## 🗑️ Archive (Completados Anteriores)
+## 🗑️ Archive
 
 <details>
-<summary>Semana del 2025-10-27</summary>
+<summary>Noviembre 2025 - Setup Inicial</summary>
 
-- [x] Investigar frameworks
-- [x] Comparar Next.js vs Remix
-- [x] Decidir stack tecnológico
+- [x] Setup inicial del proyecto (2025-11-03)
+- [x] Configuracion de .claude/ (2025-11-03)
+- [x] Instalacion de dependencias (2025-11-03)
+- [x] Configuracion Firebase (Auth, Firestore, Hosting)
+- [x] AuthContext y Login
+- [x] Gestion de empleados (CRUD)
+- [x] Reloj Checador
+- [x] Generador de Permisos PDF
+- [x] Papeleta de Vacaciones PDF
+- [x] Solicitud de Prestamo PDF
+- [x] Dashboard con Chart.js
+- [x] Requisiciones (admin)
+- [x] Panel de Administrador
 </details>
-
----
-
-## How to Use
-
-### Agregar Nueva Tarea
-```markdown
-- [ ] Descripción de la tarea
-  - Subtarea 1
-  - Subtarea 2
-```
-
-### Marcar Completada
-```markdown
-- [x] Tarea completada
-  - Completado: YYYY-MM-DD
-```
-
-### Mover a Prioridad
-Si una tarea se vuelve urgente, muévela a High Priority.
-
-### Archivar
-Al final de cada semana:
-1. Mueve completadas a "Completed (Esta Semana)"
-2. Al final del mes, mueve a "Archive"
-
----
-
-## Tips
-
-- ✅ Revisa esta lista al inicio de cada sesión
-- ✅ Actualiza después de completar tareas
-- ✅ Divide tareas grandes en subtareas
-- ✅ Sé específico en las descripciones
-- ✅ Incluye criterios de aceptación
-- ✅ Estima tiempos si es útil
-
----
-
-## Dile a Claude
-
-Al inicio de sesión:
-```
-Lee .claude/memory/TODO.md y ayúdame con la tarea de mayor prioridad
-```
-
-Para actualizar:
-```
-Actualiza .claude/memory/TODO.md:
-- Marca [tarea X] como completada
-- Agrega nueva tarea: [descripción]
-```
