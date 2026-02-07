@@ -729,15 +729,24 @@ export const incomesService = {
     return unsubscribe;
   },
 
-  // Migrar ingresos de localStorage a Firestore
+  // Migrar ingresos de localStorage a Firestore (una sola vez)
   async syncFromLocalStorage(employeeName: string): Promise<void> {
     try {
+      const syncKey = `incomes_synced_${employeeName.replace(/\s+/g, '_')}`;
+      if (localStorage.getItem(syncKey) === 'true') return;
+
       const key = `incomes_${employeeName.replace(/\s+/g, '_')}`;
       const stored = localStorage.getItem(key);
-      if (!stored) return;
+      if (!stored) {
+        localStorage.setItem(syncKey, 'true');
+        return;
+      }
 
       const localIncomes: IncomeEntry[] = JSON.parse(stored);
-      if (localIncomes.length === 0) return;
+      if (localIncomes.length === 0) {
+        localStorage.setItem(syncKey, 'true');
+        return;
+      }
 
       // Verificar qué ingresos ya existen en Firestore
       const existingIncomes = await this.getByEmployee(employeeName);
@@ -761,6 +770,9 @@ export const incomesService = {
         await batch.commit();
         console.log(`${count} ingresos de ${employeeName} sincronizados con Firestore`);
       }
+
+      // Marcar como sincronizado para no repetir
+      localStorage.setItem(syncKey, 'true');
     } catch (error) {
       console.error('Error al sincronizar ingresos:', error);
     }

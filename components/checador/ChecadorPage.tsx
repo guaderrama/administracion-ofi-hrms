@@ -210,21 +210,24 @@ export const ChecadorPage: React.FC = () => {
     
     const loadIncomes = useCallback(async (employee: Employee) => {
         try {
-            // Primero migrar datos existentes de localStorage a Firestore
+            // Migrar datos de localStorage a Firestore (solo la primera vez)
             await incomesService.syncFromLocalStorage(employee.name);
-            // Luego cargar desde Firestore
+            // Cargar desde Firestore (fuente de verdad)
             const loadedIncomes = await incomesService.getByEmployee(employee.name);
             setIncomes(loadedIncomes);
+
+            // Actualizar localStorage para que refleje Firestore
+            const key = getIncomesKey(employee.name);
+            localStorage.setItem(key, JSON.stringify(loadedIncomes));
         } catch (error) {
             console.error('Error al cargar ingresos:', error);
-            // Fallback a localStorage
+            // Fallback a localStorage solo si Firestore falla
             const key = getIncomesKey(employee.name);
             const storedIncomes = localStorage.getItem(key);
             let loadedIncomes: IncomeEntry[] = [];
             try {
                 loadedIncomes = storedIncomes ? JSON.parse(storedIncomes) : [];
             } catch {
-                // localStorage corrupto, usar array vacío
                 localStorage.removeItem(key);
             }
             setIncomes(loadedIncomes);
