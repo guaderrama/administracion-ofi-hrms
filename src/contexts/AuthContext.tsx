@@ -1,7 +1,7 @@
 // AuthContext - Contexto de autenticación Firebase con roles
 // Provee estado de autenticación y rol del usuario a toda la app
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import {
   User,
   onAuthStateChanged,
@@ -134,6 +134,45 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
 
     return () => unsubscribe();
   }, []);
+
+  // Auto-logout por inactividad (10 minutos)
+  const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutos en ms
+  const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const resetInactivityTimer = useCallback(() => {
+    if (inactivityTimer.current) {
+      clearTimeout(inactivityTimer.current);
+    }
+    // Solo iniciar timer si hay usuario autenticado
+    if (user) {
+      inactivityTimer.current = setTimeout(() => {
+        console.log('Sesión cerrada por inactividad (10 minutos)');
+        signOut(auth);
+      }, INACTIVITY_TIMEOUT);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      if (inactivityTimer.current) {
+        clearTimeout(inactivityTimer.current);
+      }
+      return;
+    }
+
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    events.forEach(event => window.addEventListener(event, resetInactivityTimer));
+
+    // Iniciar timer al montar
+    resetInactivityTimer();
+
+    return () => {
+      events.forEach(event => window.removeEventListener(event, resetInactivityTimer));
+      if (inactivityTimer.current) {
+        clearTimeout(inactivityTimer.current);
+      }
+    };
+  }, [user, resetInactivityTimer]);
 
   // Función de login
   const login = async (email: string, password: string): Promise<UserCredential> => {
