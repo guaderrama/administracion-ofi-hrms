@@ -1,12 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import type { IncomeEntry, PaymentConcept } from '../../types';
 import { PAYMENT_CONCEPT_OPTIONS } from './incomeConstants';
+import { useToast } from '../ui/Toast';
 
 interface IncomeFormProps {
   onSubmit: (data: Omit<IncomeEntry, 'id' | 'employeeName' | 'notes'>) => void;
 }
 
 export const IncomeForm: React.FC<IncomeFormProps> = ({ onSubmit }) => {
+  const toast = useToast();
   const initialState = {
     paymentDate: new Date().toISOString().split('T')[0],
     paymentConcept: PAYMENT_CONCEPT_OPTIONS[0],
@@ -23,7 +25,7 @@ export const IncomeForm: React.FC<IncomeFormProps> = ({ onSubmit }) => {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!formData.amount || parseFloat(formData.amount) <= 0) {
-      alert('Por favor, ingrese un importe válido.');
+      toast.warning('Por favor, ingrese un importe válido.');
       return;
     }
     onSubmit({

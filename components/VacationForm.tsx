@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { VacationRequest, DetailedEmployee } from '../types';
 import { calculateVacationDays } from '../utils/vacationCalculator';
 import { employeesService } from '../src/services/firestoreService';
+import { useToast } from './ui/Toast';
 
 interface VacationFormProps {
   onSubmit: (data: VacationRequest) => void;
@@ -27,6 +28,7 @@ const InputField: React.FC<{ label: string; id: string; type?: string; value: st
 
 
 export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerating }) => {
+  const toast = useToast();
   const today = new Date().toISOString().split('T')[0];
   const [formData, setFormData] = useState<VacationRequest>({
     firstName: '',
@@ -109,11 +111,11 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
     if (dateToAdd && !formData.dates.includes(dateToAdd)) {
         const selectedDate = new Date(dateToAdd + 'T12:00:00');
         if (selectedDate.getDay() === 0) { // 0 is Sunday
-          alert('El domingo es día de descanso y no puede ser seleccionado como día de vacaciones.');
+          toast.warning('El domingo es día de descanso y no puede ser seleccionado como día de vacaciones.');
           return;
         }
         if (excludeSaturdays && selectedDate.getDay() === 6) { // 6 is Saturday
-          alert('El sábado ha sido marcado como día de descanso y no puede ser seleccionado.');
+          toast.warning('El sábado ha sido marcado como día de descanso y no puede ser seleccionado.');
           return;
         }
         const newDates = [...formData.dates, dateToAdd].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
@@ -129,7 +131,7 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
     const end = new Date(endDate + 'T12:00:00');
     
     if (start > end) {
-        alert('La fecha de inicio no puede ser posterior a la fecha de fin.');
+        toast.warning('La fecha de inicio no puede ser posterior a la fecha de fin.');
         return;
     }
 
@@ -168,7 +170,7 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if(formData.daysRequested > formData.vacationDaysEntitled){
-      alert('Error: Has seleccionado más días de los que te corresponden. Por favor, ajusta las fechas.');
+      toast.error('Has seleccionado más días de los que te corresponden. Por favor, ajusta las fechas.');
       return;
     }
     onSubmit(formData);

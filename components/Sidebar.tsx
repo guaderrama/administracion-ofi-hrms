@@ -138,6 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
             <button
                 onClick={() => toggleSection(sectionKey)}
                 className="w-full group flex items-center px-2 py-2 text-left text-base font-medium rounded-md text-amber-100 hover:bg-amber-900/50 hover:text-white focus:outline-none transition-colors duration-150"
+                aria-expanded={isOpen}
             >
                 {icon}
                 <span className="ml-3 flex-1">{title}</span>
@@ -163,12 +164,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
         />
       )}
 
-      <div className={`
+      <aside className={`
         fixed lg:static inset-y-0 left-0 z-50
-        flex-shrink-0 w-64 bg-[#4A3728] text-white flex flex-col shadow-2xl
+        flex-shrink-0 w-64 bg-brand-900 text-white flex flex-col shadow-2xl
         transform transition-transform duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-      `}>
+      `} aria-label="Navegación principal">
         <div className="flex items-center justify-between h-16 flex-shrink-0 px-4 border-b border-amber-900/50">
           <h1 className="font-serif text-2xl text-amber-50">Portal Interno</h1>
           {/* Botón cerrar solo en móvil */}
@@ -317,7 +318,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
             </button>
         </div>
       </div>
-    </div>
+    </aside>
     </>
   );
 };

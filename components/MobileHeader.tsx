@@ -13,7 +13,7 @@ const MenuIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 export const MobileHeader: React.FC<MobileHeaderProps> = ({ onMenuToggle, title = 'Portal Interno' }) => {
   return (
-    <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-[#4A3728] text-white shadow-lg">
+    <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-brand-900 text-white shadow-lg" role="banner">
       <div className="flex items-center justify-between h-14 px-4">
         <button
           onClick={onMenuToggle}

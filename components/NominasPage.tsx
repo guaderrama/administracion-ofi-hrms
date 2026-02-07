@@ -14,6 +14,9 @@ import {
   getEmployeeFullName,
 } from './nominasUtils';
 import type { DetailedEmployee } from '../types';
+import { AccessDenied } from './ui/AccessDenied';
+import { StatusBadge } from './ui/StatusBadge';
+import { Card } from './ui/Card';
 
 declare const jspdf: any;
 declare const html2canvas: any;
@@ -37,33 +40,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
 
   // Access control
   if (!user) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
-        <div className="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
-          <div className="text-6xl mb-4">🔒</div>
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">Acceso Restringido</h2>
-          <p className="text-slate-600 mb-4">Debes iniciar sesión para acceder a esta sección.</p>
-          <button onClick={() => setView('dashboard')} className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700">
-            Volver al Inicio
-          </button>
-        </div>
-      </div>
-    );
+    return <AccessDenied icon="🔒" title="Acceso Restringido" message="Debes iniciar sesión para acceder a esta sección." onBack={() => setView('dashboard')} />;
   }
 
   if (!isAdmin) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
-        <div className="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
-          <div className="text-6xl mb-4">⚠️</div>
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">Acceso Denegado</h2>
-          <p className="text-slate-600 mb-4">No tienes permisos de administrador para acceder a Nóminas.</p>
-          <button onClick={() => setView('dashboard')} className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700">
-            Volver al Inicio
-          </button>
-        </div>
-      </div>
-    );
+    return <AccessDenied message="No tienes permisos de administrador para acceder a Nóminas." onBack={() => setView('dashboard')} />;
   }
 
   const generatePdf = async (employee: DetailedEmployee) => {
@@ -155,8 +136,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       </header>
 
       {/* Period Selector */}
-      <div className="bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 p-6 mb-6">
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Periodo de Nómina</h2>
+      <Card title="Periodo de Nómina" className="mb-6">
         <div className="flex flex-wrap gap-4 items-end">
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-1">Año</label>
@@ -213,10 +193,10 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             </span>
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* Employee Table */}
-      <div className="bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 p-6 mb-6">
+      <Card className="mb-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold text-slate-800">
             Colaboradores ({employees.length})
@@ -262,15 +242,9 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                       <span className="text-xs text-slate-500 ml-1">({vacation.yearsWorked} {vacation.yearsWorked === 1 ? 'año' : 'años'})</span>
                     </td>
                     <td className="py-3 px-2 text-center">
-                      {vacation.eligible ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          Si aplica
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                          No aplica
-                        </span>
-                      )}
+                      <StatusBadge variant={vacation.eligible ? 'success' : 'error'}>
+                        {vacation.eligible ? 'Si aplica' : 'No aplica'}
+                      </StatusBadge>
                     </td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoPuntualidad)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoObjetivos)}</td>
@@ -307,7 +281,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             No hay colaboradores registrados.
           </div>
         )}
-      </div>
+      </Card>
 
       {/* PDF Preview (hidden off-screen for capture, visible when selected) */}
       {selectedEmployee && (

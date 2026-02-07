@@ -16,6 +16,69 @@
                         'sans': ['Roboto', 'sans-serif'],
                         'serif': ['Playfair Display', 'serif'],
                     },
+                    colors: {
+                        brand: {
+                            50: '#FDF8F3',
+                            100: '#FAF0E4',
+                            200: '#F0DCC3',
+                            300: '#E8D8C4',
+                            400: '#D8A788',
+                            500: '#B08D57',
+                            600: '#8B6914',
+                            700: '#704241',
+                            800: '#5A3A2E',
+                            900: '#4A3728',
+                            950: '#2E231A',
+                        },
+                        accent: {
+                            light: '#F59E0B',
+                            DEFAULT: '#D97706',
+                            dark: '#B45309',
+                        },
+                        success: {
+                            light: '#D1FAE5',
+                            DEFAULT: '#10B981',
+                            dark: '#047857',
+                        },
+                        warning: {
+                            light: '#FEF3C7',
+                            DEFAULT: '#F59E0B',
+                            dark: '#B45309',
+                        },
+                        error: {
+                            light: '#FEE2E2',
+                            DEFAULT: '#EF4444',
+                            dark: '#B91C1C',
+                        },
+                        info: {
+                            light: '#DBEAFE',
+                            DEFAULT: '#3B82F6',
+                            dark: '#1D4ED8',
+                        },
+                    },
+                    borderRadius: {
+                        'card': '0.75rem',
+                        'button': '0.5rem',
+                        'badge': '9999px',
+                    },
+                    boxShadow: {
+                        'card': '0 4px 6px -1px rgba(74,55,40,0.1), 0 2px 4px -2px rgba(74,55,40,0.1)',
+                        'card-hover': '0 10px 15px -3px rgba(74,55,40,0.15), 0 4px 6px -4px rgba(74,55,40,0.1)',
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.25s ease-out',
+                        'slide-up': 'slideUp 0.2s ease-out',
+                        'toast-in': 'toastIn 0.4s ease-out',
+                        'toast-out': 'toastOut 0.3s ease-in forwards',
+                        'skeleton': 'skeleton 1.5s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+                        slideUp: { '0%': { opacity: '0', transform: 'translateY(0.5rem)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+                        toastIn: { '0%': { opacity: '0', transform: 'translateY(-1rem) scale(0.95)' }, '100%': { opacity: '1', transform: 'translateY(0) scale(1)' } },
+                        toastOut: { '0%': { opacity: '1', transform: 'translateY(0) scale(1)' }, '100%': { opacity: '0', transform: 'translateY(-1rem) scale(0.95)' } },
+                        skeleton: { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
+                    },
                 },
             },
         };
@@ -31,6 +94,16 @@
         background: linear-gradient(-45deg, #F5EFE6, #E8D8C4, #D8A788, #FDF0E0);
         background-size: 400% 400%;
         animation: animateGradient 15s ease infinite;
+      }
+      *:focus-visible {
+        outline: 2px solid #D97706;
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+      .skeleton-bg {
+        background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+        background-size: 200% 100%;
+        animation: skeleton 1.5s ease-in-out infinite;
       }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>

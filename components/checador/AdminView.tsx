@@ -10,6 +10,7 @@ import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMeth
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../../src/firebaseConfig';
 import { employeesService, logsService, permissionsService, schedulesService, migrateAllDataToFirestore, cleanDuplicateLogs } from '../../src/services/firestoreService';
+import { useToast } from '../ui/Toast';
 
 interface AdminViewProps {
   onExit: () => void;
@@ -115,6 +116,7 @@ const generateTimeOptions = (): string[] => {
 
 export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const [allLogs, setAllLogs] = useState<LogEntry[]>([]);
+  const toast = useToast();
   const [schedules, setSchedules] = useState<{ [key: string]: ScheduleConfig }>({});
   const [detailedEmployees, setDetailedEmployees] = useState<DetailedEmployee[]>([]);
   const [permissionRequests, setPermissionRequests] = useState<PermissionRequest[]>([]);
@@ -365,10 +367,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const saveSchedules = async () => {
     try {
       await schedulesService.save(schedules);
-      alert('Horarios guardados.');
+      toast.success('Horarios guardados.');
     } catch (error) {
       console.error('Error al guardar horarios:', error);
-      alert('Error al guardar horarios. Intenta de nuevo.');
+      toast.error('Error al guardar horarios. Intenta de nuevo.');
     }
   };
 
@@ -383,13 +385,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     try {
       const result = await cleanDuplicateLogs();
       if (result.deleted > 0) {
-        alert(`Limpieza completada.\n\n${result.deleted} registros duplicados eliminados.`);
+        toast.success(`Limpieza completada. ${result.deleted} registros duplicados eliminados.`);
       } else {
-        alert('No se encontraron registros duplicados.');
+        toast.info('No se encontraron registros duplicados.');
       }
     } catch (error) {
       console.error('Error al limpiar duplicados:', error);
-      alert('Error al limpiar duplicados. Revisa la consola para más detalles.');
+      toast.error('Error al limpiar duplicados. Revisa la consola para más detalles.');
     } finally {
       setIsCleaningDuplicates(false);
     }
@@ -400,14 +402,14 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const handleRegisterEmployee = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!newEmployee.nombres || !newEmployee.paterno || !newEmployee.fechaNacimiento || !newEmployee.email) {
-      alert('Nombre(s), Apellido Paterno, Fecha de Cumpleaños y Email son obligatorios.');
+      toast.warning('Nombre(s), Apellido Paterno, Fecha de Cumpleaños y Email son obligatorios.');
       return;
     }
 
     // Validar formato de email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(newEmployee.email)) {
-      alert('Por favor ingresa un email válido.');
+      toast.warning('Por favor ingresa un email válido.');
       return;
     }
 
@@ -419,7 +421,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
       // Verificar si el email ya existe en detailed_employees
       if (existingEmployees.some(emp => emp.email === newEmployee.email)) {
-        alert('Ya existe un colaborador con este email en el panel.');
+        toast.error('Ya existe un colaborador con este email en el panel.');
         setIsRegistering(false);
         return;
       }
@@ -522,32 +524,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
       // Mostrar mensaje según el caso
       if (accountLinked) {
-        alert(
-          `Colaborador registrado y vinculado exitosamente!\n\n` +
-          `Nombre: ${newEmployee.nombres} ${newEmployee.paterno}\n` +
-          `Email: ${newEmployee.email}\n` +
-          `Código: ${employeeCode}\n\n` +
-          `La cuenta ya existía y ha sido vinculada.\n` +
-          `Puedes enviarle un email de restablecimiento de contraseña si lo necesita.`
-        );
+        toast.success(`Colaborador ${newEmployee.nombres} ${newEmployee.paterno} registrado y vinculado exitosamente. Código: ${employeeCode}`);
       } else if (firebaseUid) {
-        alert(
-          `Colaborador registrado exitosamente!\n\n` +
-          `Nombre: ${newEmployee.nombres} ${newEmployee.paterno}\n` +
-          `Email: ${newEmployee.email}\n` +
-          `Contraseña: ${employeeCode}\n\n` +
-          `El colaborador puede iniciar sesión con estas credenciales.`
-        );
+        toast.success(`Colaborador ${newEmployee.nombres} ${newEmployee.paterno} registrado exitosamente. Contraseña: ${employeeCode}`);
       } else {
-        alert(
-          `Colaborador registrado!\n\n` +
-          `Nombre: ${newEmployee.nombres} ${newEmployee.paterno}\n` +
-          `Email: ${newEmployee.email}\n` +
-          `Código: ${employeeCode}\n\n` +
-          `Nota: El email existe en Auth pero sin perfil vinculado.\n` +
-          `El colaborador debe iniciar sesión para completar la vinculación,\n` +
-          `o puedes usar el botón de "Crear cuenta" después.`
-        );
+        toast.info(`Colaborador ${newEmployee.nombres} ${newEmployee.paterno} registrado. El email existe en Auth pero sin perfil vinculado. Use "Crear cuenta" después.`);
       }
 
       setNewEmployee(initialFormState);
@@ -622,26 +603,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
             // Guardar en Firestore
             await employeesService.create(newEmployeeData);
 
-            alert(
-              `Colaborador registrado y vinculado exitosamente!\n\n` +
-              `Nombre: ${newEmployee.nombres} ${newEmployee.paterno}\n` +
-              `Email: ${newEmployee.email}\n` +
-              `Código: ${employeeCode}\n\n` +
-              `La cuenta ya existía en Firebase Auth y ha sido vinculada.\n` +
-              `Puedes enviarle un email de restablecimiento de contraseña si lo necesita.`
-            );
+            toast.success(`Colaborador ${newEmployee.nombres} ${newEmployee.paterno} registrado y vinculado exitosamente. Código: ${employeeCode}`);
 
             setNewEmployee(initialFormState);
             setScheduleForm(initialScheduleState);
           } catch (linkError: any) {
             console.error('Error al vincular cuenta existente:', linkError);
-            alert(`Error al vincular: ${linkError.message}`);
+            toast.error(`Error al vincular: ${linkError.message}`);
           }
         }
       } else if (error.code === 'auth/weak-password') {
-        alert('El código generado es muy débil. Contacta al administrador del sistema.');
+        toast.warning('El código generado es muy débil. Contacta al administrador del sistema.');
       } else {
-        alert(`Error al registrar: ${error.message}`);
+        toast.error(`Error al registrar: ${error.message}`);
       }
     } finally {
       setIsRegistering(false);
@@ -671,12 +645,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         }, { merge: true });
       }
 
-      alert('Colaborador actualizado exitosamente.');
+      toast.success('Colaborador actualizado exitosamente.');
       setIsEditModalOpen(false);
       setEditingEmployee(null);
     } catch (error: any) {
       console.error('Error al actualizar colaborador:', error);
-      alert(`Error al actualizar: ${error.message}`);
+      toast.error(`Error al actualizar: ${error.message}`);
     } finally {
       setIsSavingEdit(false);
     }
@@ -698,10 +672,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
       // Nota: No eliminamos la cuenta de Firebase Auth por seguridad
       // El admin puede desactivarla desde la consola de Firebase si es necesario
 
-      alert(`Colaborador ${employee.nombres} ${employee.paterno} dado de baja exitosamente.`);
+      toast.success(`Colaborador ${employee.nombres} ${employee.paterno} dado de baja exitosamente.`);
     } catch (error: any) {
       console.error('Error al eliminar colaborador:', error);
-      alert(`Error al eliminar: ${error.message}`);
+      toast.error(`Error al eliminar: ${error.message}`);
     }
   };
 
@@ -724,22 +698,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         // Actualizar el registro del empleado con el firebaseUid en Firestore
         await employeesService.update(employee.id, { firebaseUid: uid });
 
-        alert(
-          `Cuenta vinculada exitosamente!\n\n` +
-          `El colaborador ${employee.nombres} ${employee.paterno} ha sido vinculado a su cuenta existente.\n\n` +
-          `Puede enviarle un email de restablecimiento de contraseña si lo necesita.`
-        );
+        toast.success(`Cuenta vinculada exitosamente. ${employee.nombres} ${employee.paterno} ha sido vinculado a su cuenta existente.`);
       } else {
         // No hay documento en Firestore pero sí en Auth
         // Crear documento en Firestore (se creará cuando el usuario inicie sesión)
-        alert(
-          `El email existe en Firebase Auth pero no tiene perfil en Firestore.\n\n` +
-          `El colaborador debe iniciar sesión para completar su perfil, o puede eliminar la cuenta desde Firebase Console y crearla de nuevo.`
-        );
+        toast.info('El email existe en Firebase Auth pero no tiene perfil en Firestore. El colaborador debe iniciar sesión para completar su perfil.');
       }
     } catch (error: any) {
       console.error('Error al vincular cuenta:', error);
-      alert(`Error al vincular cuenta: ${error.message}`);
+      toast.error(`Error al vincular cuenta: ${error.message}`);
     } finally {
       setCreatingAccountForId(null);
     }
@@ -749,13 +716,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const handleCreateAccount = async (employee: DetailedEmployee) => {
     // Validar que tenga email
     if (!employee.email) {
-      alert('Este colaborador no tiene email registrado. Por favor, edita el registro y agrega un email primero.');
+      toast.error('Este colaborador no tiene email registrado. Por favor, edita el registro y agrega un email primero.');
       return;
     }
 
     // Validar que no tenga cuenta ya
     if (employee.firebaseUid) {
-      alert('Este colaborador ya tiene una cuenta de acceso activa.');
+      toast.info('Este colaborador ya tiene una cuenta de acceso activa.');
       return;
     }
 
@@ -814,13 +781,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
       // Actualizar el registro del empleado con el firebaseUid en Firestore
       await employeesService.update(employee.id, { firebaseUid: userCredential.user.uid });
 
-      alert(
-        `Cuenta creada exitosamente!\n\n` +
-        `Nombre: ${employee.nombres} ${employee.paterno}\n` +
-        `Email: ${employee.email}\n` +
-        `Contraseña: ${employee.codigo}\n\n` +
-        `El colaborador puede iniciar sesión con estas credenciales.`
-      );
+      toast.success(`Cuenta creada exitosamente para ${employee.nombres} ${employee.paterno}. Contraseña: ${employee.codigo}`);
     } catch (error: any) {
       console.error('Error al crear cuenta:', error);
       if (error.code === 'auth/email-already-in-use') {
@@ -833,11 +794,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
           await handleLinkExistingAccount(employee);
         }
       } else if (error.code === 'auth/weak-password') {
-        alert('El código es muy corto para ser una contraseña segura. Firebase requiere mínimo 6 caracteres.');
+        toast.warning('El código es muy corto para ser una contraseña segura. Firebase requiere mínimo 6 caracteres.');
       } else if (error.code === 'auth/invalid-email') {
-        alert('El email no es válido. Por favor, verifica el formato.');
+        toast.error('El email no es válido. Por favor, verifica el formato.');
       } else {
-        alert(`Error al crear cuenta: ${error.message}`);
+        toast.error(`Error al crear cuenta: ${error.message}`);
       }
     } finally {
       setCreatingAccountForId(null);
@@ -847,7 +808,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   // Función para restablecer contraseña de un empleado
   const handleResetPassword = async (employee: DetailedEmployee) => {
     if (!employee.email) {
-      alert('Este colaborador no tiene email registrado.');
+      toast.error('Este colaborador no tiene email registrado.');
       return;
     }
 
@@ -873,19 +834,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         prev.map(emp => emp.id === employee.id ? { ...emp, lastPasswordReset: resetDate } : emp)
       );
 
-      alert(
-        `Email enviado exitosamente a ${employee.email}\n\n` +
-        `El colaborador debe revisar su bandeja de entrada (y spam) para restablecer su contraseña.`
-      );
+      toast.success(`Email enviado exitosamente a ${employee.email}. El colaborador debe revisar su bandeja de entrada.`);
     } catch (error: unknown) {
       console.error('Error al enviar email de restablecimiento:', error);
       const firebaseError = error as { code?: string; message?: string };
       if (firebaseError.code === 'auth/user-not-found') {
-        alert('No existe una cuenta con este email. Primero debes crear la cuenta de acceso.');
+        toast.error('No existe una cuenta con este email. Primero debes crear la cuenta de acceso.');
       } else if (firebaseError.code === 'auth/invalid-email') {
-        alert('El email no es válido.');
+        toast.error('El email no es válido.');
       } else {
-        alert(`Error al enviar email: ${firebaseError.message || 'Error desconocido'}`);
+        toast.error(`Error al enviar email: ${firebaseError.message || 'Error desconocido'}`);
       }
     } finally {
       setResettingPasswordForId(null);
@@ -914,7 +872,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
   const handleDeleteLog = async (log: LogEntry) => {
     if (!log.id) {
-      alert('Este registro no tiene ID y no puede ser eliminado.');
+      toast.error('Este registro no tiene ID y no puede ser eliminado.');
       return;
     }
 
@@ -930,16 +888,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
     try {
       await logsService.delete(log.id);
-      alert('Registro eliminado exitosamente.');
+      toast.success('Registro eliminado exitosamente.');
     } catch (error: any) {
       console.error('Error al eliminar registro:', error);
-      alert(`Error al eliminar: ${error.message}`);
+      toast.error(`Error al eliminar: ${error.message}`);
     }
   };
 
   const handleSaveLogEdit = async () => {
     if (!editingLog || !editingLog.id) {
-      alert('No se puede guardar: el registro no tiene ID.');
+      toast.error('No se puede guardar: el registro no tiene ID.');
       return;
     }
 
@@ -957,12 +915,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         location: editingLog.location,
       });
 
-      alert('Registro actualizado exitosamente.');
+      toast.success('Registro actualizado exitosamente.');
       setIsLogEditModalOpen(false);
       setEditingLog(null);
     } catch (error: any) {
       console.error('Error al actualizar registro:', error);
-      alert(`Error al actualizar: ${error.message}`);
+      toast.error(`Error al actualizar: ${error.message}`);
     } finally {
       setIsSavingLog(false);
     }
@@ -970,7 +928,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
   const handleDownloadEmployeesCSV = () => {
     if (detailedEmployees.length === 0) {
-        alert('No hay colaboradores registrados para descargar.');
+        toast.info('No hay colaboradores registrados para descargar.');
         return;
     }
 

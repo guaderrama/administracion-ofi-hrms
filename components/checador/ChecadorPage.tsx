@@ -14,9 +14,12 @@ import { EMPLOYEES } from '../../checadorConstants';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { logsService, employeesService, incomesService } from '../../src/services/firestoreService';
 import { PaymentConcept } from '../../types';
+import { useToast } from '../ui/Toast';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 export const ChecadorPage: React.FC = () => {
     const { user, userData, isAdmin } = useAuth();
+    const toast = useToast();
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
     const [authenticatedEmployee, setAuthenticatedEmployee] = useState<Employee | null>(null);
     const [dailyLogs, setDailyLogs] = useState<LogEntry[]>([]);
@@ -29,6 +32,9 @@ export const ChecadorPage: React.FC = () => {
     const [editingIncome, setEditingIncome] = useState<IncomeEntry | null>(null);
     const [isIncomeEditModalOpen, setIsIncomeEditModalOpen] = useState(false);
     const [isSavingIncome, setIsSavingIncome] = useState(false);
+
+    // Estado para diálogo de confirmación
+    const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; income: IncomeEntry | null }>({ isOpen: false, income: null });
 
     // Cargar empleados desde Firestore
     useEffect(() => {
@@ -264,7 +270,7 @@ export const ChecadorPage: React.FC = () => {
             setAuthenticatedEmployee(selectedEmployee);
             setSelectedEmployee(null);
         } else {
-            alert('PIN incorrecto. Intente de nuevo.');
+            toast.error('PIN incorrecto. Intente de nuevo.');
         }
     };
     
@@ -317,7 +323,7 @@ export const ChecadorPage: React.FC = () => {
             loadDailyLogs(authenticatedEmployee); // Recargar para actualizar status
         } catch (error) {
             console.error('Error al guardar registro:', error);
-            alert('Error al guardar registro. Intenta de nuevo.');
+            toast.error('Error al guardar registro. Intenta de nuevo.');
         }
     };
 
@@ -330,10 +336,10 @@ export const ChecadorPage: React.FC = () => {
                 ...data
             });
             setIncomes([...incomes, newIncome]);
-            alert('Ingreso registrado exitosamente.');
+            toast.success('Ingreso registrado exitosamente.');
         } catch (error) {
             console.error('Error al guardar ingreso:', error);
-            alert('Error al guardar ingreso. Intenta de nuevo.');
+            toast.error('Error al guardar ingreso. Intenta de nuevo.');
         }
     };
 
@@ -343,24 +349,22 @@ export const ChecadorPage: React.FC = () => {
         setIsIncomeEditModalOpen(true);
     };
 
-    const handleDeleteIncome = async (income: IncomeEntry) => {
-        const confirmDelete = window.confirm(
-            `¿Estás seguro de que deseas eliminar este ingreso?\n\n` +
-            `Fecha: ${new Date(income.paymentDate + 'T12:00:00').toLocaleDateString('es-MX')}\n` +
-            `Concepto: ${income.paymentConcept}\n` +
-            `Importe: $${income.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n\n` +
-            `Esta acción no se puede deshacer.`
-        );
+    const handleDeleteIncome = (income: IncomeEntry) => {
+        setDeleteConfirm({ isOpen: true, income });
+    };
 
-        if (!confirmDelete) return;
+    const confirmDeleteIncome = async () => {
+        const income = deleteConfirm.income;
+        if (!income) return;
+        setDeleteConfirm({ isOpen: false, income: null });
 
         try {
             await incomesService.delete(income.id, income.employeeName);
             setIncomes(incomes.filter(i => i.id !== income.id));
-            alert('Ingreso eliminado exitosamente.');
+            toast.success('Ingreso eliminado exitosamente.');
         } catch (error: any) {
             console.error('Error al eliminar ingreso:', error);
-            alert(`Error al eliminar: ${error.message}`);
+            toast.error(`Error al eliminar: ${error.message}`);
         }
     };
 
@@ -371,12 +375,12 @@ export const ChecadorPage: React.FC = () => {
         try {
             await incomesService.update(editingIncome.id, editingIncome);
             setIncomes(incomes.map(i => i.id === editingIncome.id ? editingIncome : i));
-            alert('Ingreso actualizado exitosamente.');
+            toast.success('Ingreso actualizado exitosamente.');
             setIsIncomeEditModalOpen(false);
             setEditingIncome(null);
         } catch (error: any) {
             console.error('Error al actualizar ingreso:', error);
-            alert(`Error al actualizar: ${error.message}`);
+            toast.error(`Error al actualizar: ${error.message}`);
         } finally {
             setIsSavingIncome(false);
         }
@@ -430,6 +434,16 @@ export const ChecadorPage: React.FC = () => {
                     onClose={() => setSelectedEmployee(null)}
                 />
             )}
+
+            {/* Diálogo de confirmación para eliminar ingreso */}
+            <ConfirmDialog
+                isOpen={deleteConfirm.isOpen}
+                title="Eliminar Ingreso"
+                message={deleteConfirm.income ? `¿Eliminar ingreso de ${deleteConfirm.income.paymentConcept} por $${deleteConfirm.income.amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}? Esta acción no se puede deshacer.` : ''}
+                variant="danger"
+                onConfirm={confirmDeleteIncome}
+                onCancel={() => setDeleteConfirm({ isOpen: false, income: null })}
+            />
 
             {/* Modal de Edición de Ingreso (solo admin) */}
             {isIncomeEditModalOpen && editingIncome && (

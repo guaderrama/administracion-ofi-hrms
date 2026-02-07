@@ -3,6 +3,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import type { PermissionRequest, DetailedEmployee } from '../types';
 import { PermissionType, Reason, Compensation, CompensationMethod } from '../types';
 import { PERMISSION_TYPE_OPTIONS, REASON_OPTIONS, COMPENSATION_OPTIONS, COMPENSATION_METHOD_OPTIONS } from '../constants';
+import { useToast } from './ui/Toast';
 
 interface PermissionFormProps {
   onSubmit: (data: Omit<PermissionRequest, 'id' | 'status'>) => void;
@@ -46,6 +47,7 @@ const SelectField: React.FC<{ label: string; id: string; value: string; onChange
 
 
 export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGenerating }) => {
+  const toast = useToast();
   const [employeeCode, setEmployeeCode] = useState('');
   const [codeError, setCodeError] = useState('');
   const [employeeFound, setEmployeeFound] = useState(false);
@@ -155,7 +157,7 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
     const end = new Date(endDate);
 
     if (start > end) {
-      alert('La fecha de inicio no puede ser posterior a la fecha de fin.');
+      toast.warning('La fecha de inicio no puede ser posterior a la fecha de fin.');
       return;
     }
 

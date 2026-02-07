@@ -11,6 +11,7 @@ import { AdminPage } from './components/AdminPage';
 import { NominasPage } from './components/NominasPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { useAuth } from './src/contexts/AuthContext';
+import { LoadingSpinner } from './components/ui/LoadingSpinner';
 
 const App: React.FC = () => {
   const { user, loading, isAdmin } = useAuth();
@@ -81,10 +82,7 @@ const App: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-400">Cargando...</p>
-        </div>
+        <LoadingSpinner size="lg" text="Cargando..." className="text-white" />
       </div>
     );
   }
@@ -110,9 +108,10 @@ const App: React.FC = () => {
 
       {/* Contenido principal */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <main className="flex-1 overflow-x-hidden overflow-y-auto pt-14 lg:pt-0">
-           {/* El fondo degradado se aplica desde el body, así que se verá aquí */}
-           {renderView()}
+        <main id="main-content" role="main" className="flex-1 overflow-x-hidden overflow-y-auto pt-14 lg:pt-0">
+           <div className="page-enter">
+             {renderView()}
+           </div>
         </main>
       </div>
     </div>

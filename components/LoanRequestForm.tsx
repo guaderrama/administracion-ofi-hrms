@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import type { LoanRequest } from '../types';
+import { useToast } from './ui/Toast';
 
 interface LoanRequestFormProps {
   onSubmit: (data: LoanRequest) => void;
@@ -26,6 +27,7 @@ const InputField: React.FC<{ label: string; id: string; type?: string; value: st
 ));
 
 export const LoanRequestForm: React.FC<LoanRequestFormProps> = ({ onSubmit, isGenerating }) => {
+  const toast = useToast();
   const today = new Date().toISOString().split('T')[0];
   const [formData, setFormData] = useState<Omit<LoanRequest, 'loanAmount' | 'installments'> & { loanAmount: string; installments: string }>({
     firstName: '',
@@ -54,7 +56,7 @@ export const LoanRequestForm: React.FC<LoanRequestFormProps> = ({ onSubmit, isGe
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!termsAccepted) {
-      alert('Debe aceptar los términos y condiciones para continuar.');
+      toast.warning('Debe aceptar los términos y condiciones para continuar.');
       return;
     }
     onSubmit({

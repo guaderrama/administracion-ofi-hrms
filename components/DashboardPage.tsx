@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { DetailedEmployee } from '@/types';
+import { Card } from './ui/Card';
 
 // Icons
 const CakeIcon: React.FC = () => (
@@ -32,15 +33,11 @@ const BellIcon: React.FC = () => (
 
 
 const InfoCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode }> = ({ title, icon, children }) => (
-    <div className="bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 p-6 space-y-4">
-        <div className="flex items-center space-x-4">
-            {icon}
-            <h3 className="text-xl font-bold text-slate-800">{title}</h3>
-        </div>
-        <div className="pl-12 space-y-2 max-h-48 overflow-y-auto">
+    <Card title={title} icon={icon}>
+        <div className="pl-11 space-y-2 max-h-48 overflow-y-auto">
             {children}
         </div>
-    </div>
+    </Card>
 );
 
 const EmployeeListItem: React.FC<{ name: string; date: string; years?: number }> = ({ name, date, years }) => (
