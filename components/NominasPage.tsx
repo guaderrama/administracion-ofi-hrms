@@ -12,6 +12,9 @@ import {
   formatCurrency,
   formatDateShort,
   getEmployeeFullName,
+  getDaysInQuincena,
+  getDefaultDays,
+  getLastDayOfMonth,
 } from './nominasUtils';
 import type { DetailedEmployee } from '../types';
 import { AccessDenied } from './ui/AccessDenied';
@@ -32,11 +35,25 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const [selectedEmployee, setSelectedEmployee] = useState<DetailedEmployee | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingProgress, setGeneratingProgress] = useState({ current: 0, total: 0 });
+  // Días trabajados por empleado: { employeeId: diasTrabajados }
+  const [daysWorked, setDaysWorked] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const unsubscribe = employeesService.subscribe((emps) => setEmployees(emps));
     return () => unsubscribe();
   }, []);
+
+  // Días del periodo actual
+  const diasEnPeriodo = getDaysInQuincena(selectedPeriod);
+
+  // Resetear días trabajados al máximo cuando cambia el periodo o empleados
+  useEffect(() => {
+    const updated: Record<string, number> = {};
+    employees.forEach((emp) => {
+      updated[emp.id] = diasEnPeriodo;
+    });
+    setDaysWorked(updated);
+  }, [employees, diasEnPeriodo]);
 
   // Access control
   if (!user) {
@@ -112,7 +129,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const totals = useMemo(() => {
     return employees.reduce(
       (acc, emp) => {
-        const s = calculateSalary(emp);
+        const days = daysWorked[emp.id] ?? diasEnPeriodo;
+        const s = calculateSalary(emp, days, diasEnPeriodo);
         acc.bonoPuntualidad += s.bonoPuntualidad;
         acc.bonoObjetivos += s.bonoObjetivos;
         acc.apoyoGasolina += s.apoyoGasolina;
@@ -121,7 +139,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       },
       { bonoPuntualidad: 0, bonoObjetivos: 0, apoyoGasolina: 0, total: 0 }
     );
-  }, [employees]);
+  }, [employees, daysWorked, diasEnPeriodo]);
 
   const currentYear = new Date().getFullYear();
   const years = [currentYear, currentYear - 1];
@@ -142,7 +160,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             <label className="block text-sm font-medium text-slate-600 mb-1">Año</label>
             <select
               value={selectedPeriod.year}
-              onChange={(e) => setSelectedPeriod({ ...selectedPeriod, year: parseInt(e.target.value) })}
+              onChange={(e) => {
+                const year = parseInt(e.target.value);
+                const days = getDefaultDays(selectedPeriod.quincena, year, selectedPeriod.month);
+                setSelectedPeriod({ ...selectedPeriod, year, ...days });
+              }}
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
             >
               {years.map(y => (
@@ -154,7 +176,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             <label className="block text-sm font-medium text-slate-600 mb-1">Mes</label>
             <select
               value={selectedPeriod.month}
-              onChange={(e) => setSelectedPeriod({ ...selectedPeriod, month: parseInt(e.target.value) })}
+              onChange={(e) => {
+                const month = parseInt(e.target.value);
+                const days = getDefaultDays(selectedPeriod.quincena, selectedPeriod.year, month);
+                setSelectedPeriod({ ...selectedPeriod, month, ...days });
+              }}
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
             >
               {months.map(m => (
@@ -166,30 +192,66 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             <label className="block text-sm font-medium text-slate-600 mb-1">Quincena</label>
             <div className="flex rounded-lg overflow-hidden border border-slate-300">
               <button
-                onClick={() => setSelectedPeriod({ ...selectedPeriod, quincena: 1 })}
+                onClick={() => {
+                  const days = getDefaultDays(1, selectedPeriod.year, selectedPeriod.month);
+                  setSelectedPeriod({ ...selectedPeriod, quincena: 1, ...days });
+                }}
                 className={`px-4 py-2 text-sm font-medium transition-colors ${
                   selectedPeriod.quincena === 1
                     ? 'bg-amber-600 text-white'
                     : 'bg-white text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                1ra (1-15)
+                1ra
               </button>
               <button
-                onClick={() => setSelectedPeriod({ ...selectedPeriod, quincena: 2 })}
+                onClick={() => {
+                  const days = getDefaultDays(2, selectedPeriod.year, selectedPeriod.month);
+                  setSelectedPeriod({ ...selectedPeriod, quincena: 2, ...days });
+                }}
                 className={`px-4 py-2 text-sm font-medium transition-colors border-l border-slate-300 ${
                   selectedPeriod.quincena === 2
                     ? 'bg-amber-600 text-white'
                     : 'bg-white text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                2da (16-fin)
+                2da
               </button>
             </div>
           </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Del día</label>
+            <input
+              type="number"
+              min={1}
+              max={selectedPeriod.endDay}
+              value={selectedPeriod.startDay}
+              onChange={(e) => {
+                const lastDay = getLastDayOfMonth(selectedPeriod.year, selectedPeriod.month);
+                const val = Math.max(1, Math.min(selectedPeriod.endDay, parseInt(e.target.value) || 1));
+                setSelectedPeriod({ ...selectedPeriod, startDay: Math.min(val, lastDay) });
+              }}
+              className="w-16 text-center px-2 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Al día</label>
+            <input
+              type="number"
+              min={selectedPeriod.startDay}
+              max={getLastDayOfMonth(selectedPeriod.year, selectedPeriod.month)}
+              value={selectedPeriod.endDay}
+              onChange={(e) => {
+                const lastDay = getLastDayOfMonth(selectedPeriod.year, selectedPeriod.month);
+                const val = Math.max(selectedPeriod.startDay, Math.min(lastDay, parseInt(e.target.value) || 1));
+                setSelectedPeriod({ ...selectedPeriod, endDay: val });
+              }}
+              className="w-16 text-center px-2 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            />
+          </div>
           <div className="ml-auto">
             <span className="inline-block px-4 py-2 bg-amber-50 text-amber-800 rounded-lg text-sm font-medium border border-amber-200">
-              {getPeriodLabel(selectedPeriod)}
+              {getPeriodLabel(selectedPeriod)} ({diasEnPeriodo} días)
             </span>
           </div>
         </div>
@@ -221,6 +283,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Fecha Ingreso</th>
                 <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Días Vacaciones</th>
                 <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Aplica Vacaciones</th>
+                <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Días Trabajados</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Puntualidad</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Objetivos</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Apoyo Gasolina</th>
@@ -230,7 +293,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             </thead>
             <tbody>
               {employees.map((emp) => {
-                const salary = calculateSalary(emp);
+                const days = daysWorked[emp.id] ?? diasEnPeriodo;
+                const salary = calculateSalary(emp, days, diasEnPeriodo);
                 const vacation = calculateVacation(emp.fechaIngreso);
                 return (
                   <tr key={emp.id} className="border-b border-slate-100 hover:bg-amber-50/50 transition-colors">
@@ -245,6 +309,20 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                       <StatusBadge variant={vacation.eligible ? 'success' : 'error'}>
                         {vacation.eligible ? 'Si aplica' : 'No aplica'}
                       </StatusBadge>
+                    </td>
+                    <td className="py-3 px-2 text-center">
+                      <input
+                        type="number"
+                        min={0}
+                        max={diasEnPeriodo}
+                        value={days}
+                        onChange={(e) => {
+                          const val = Math.max(0, Math.min(diasEnPeriodo, parseInt(e.target.value) || 0));
+                          setDaysWorked((prev) => ({ ...prev, [emp.id]: val }));
+                        }}
+                        className="w-14 text-center px-1 py-1 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                      />
+                      <span className="text-xs text-slate-400 ml-1">/{diasEnPeriodo}</span>
                     </td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoPuntualidad)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoObjetivos)}</td>
@@ -265,7 +343,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-slate-300 bg-slate-50">
-                <td className="py-3 px-2 font-bold text-slate-700" colSpan={5}>TOTALES</td>
+                <td className="py-3 px-2 font-bold text-slate-700" colSpan={6}>TOTALES</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoPuntualidad)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoObjetivos)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.apoyoGasolina)}</td>
@@ -301,7 +379,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           </div>
           <div className="overflow-auto border border-slate-200 rounded-xl bg-white shadow-inner" style={{ maxHeight: '600px' }}>
             <div style={{ transform: 'scale(0.7)', transformOrigin: 'top left', width: '142.8%' }}>
-              <NominasPdfPreview employee={selectedEmployee} period={selectedPeriod} />
+              <NominasPdfPreview
+                employee={selectedEmployee}
+                period={selectedPeriod}
+                diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
+              />
             </div>
           </div>
         </div>

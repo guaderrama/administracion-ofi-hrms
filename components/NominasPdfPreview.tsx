@@ -8,11 +8,13 @@ import {
   getEmployeeFullName,
   getLastDayOfMonth,
   getMonthName,
+  getDaysInQuincena,
 } from './nominasUtils';
 
 interface NominasPdfPreviewProps {
   employee: DetailedEmployee;
   period: PayrollPeriod;
+  diasTrabajados: number;
 }
 
 function formatDate(dateStr: string): string {
@@ -27,12 +29,12 @@ function formatDate(dateStr: string): string {
 }
 
 function getPaymentDate(period: PayrollPeriod): string {
-  const day = period.quincena === 1 ? 15 : getLastDayOfMonth(period.year, period.month);
-  return `${day} de ${getMonthName(period.month)} ${period.year}`;
+  return `${period.endDay} de ${getMonthName(period.month)} ${period.year}`;
 }
 
-export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period }) => {
-  const salary = calculateSalary(employee);
+export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados }) => {
+  const diasEnPeriodo = getDaysInQuincena(period);
+  const salary = calculateSalary(employee, diasTrabajados, diasEnPeriodo);
   const fullName = getEmployeeFullName(employee);
 
   return (
@@ -95,6 +97,10 @@ export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, 
             <tr>
               <td style={{ padding: '4px 8px' }}><strong>Fecha de Ingreso:</strong></td>
               <td style={{ padding: '4px 8px' }}>{formatDate(employee.fechaIngreso)}</td>
+            </tr>
+            <tr>
+              <td style={{ padding: '4px 8px' }}><strong>Días Trabajados:</strong></td>
+              <td style={{ padding: '4px 8px' }}>{diasTrabajados} de {diasEnPeriodo} días del periodo</td>
             </tr>
           </tbody>
         </table>

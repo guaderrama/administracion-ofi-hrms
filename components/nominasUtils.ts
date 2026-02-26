@@ -3,7 +3,9 @@ import type { DetailedEmployee } from '../types';
 export interface PayrollPeriod {
   year: number;
   month: number; // 0-11 (JavaScript month)
-  quincena: 1 | 2; // 1 = days 1-15, 2 = days 16-lastDay
+  quincena: 1 | 2; // 1 = primera quincena, 2 = segunda quincena
+  startDay: number; // día inicio del periodo (editable)
+  endDay: number;   // día fin del periodo (editable)
 }
 
 export interface SalaryBreakdown {
@@ -13,6 +15,8 @@ export interface SalaryBreakdown {
   totalPercepciones: number;
   totalDeducciones: number;
   netoAPagar: number;
+  diasTrabajados: number;
+  diasEnPeriodo: number;
 }
 
 const MESES = [
@@ -20,12 +24,21 @@ const MESES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
 ];
 
+export function getDefaultDays(quincena: 1 | 2, year: number, month: number): { startDay: number; endDay: number } {
+  if (quincena === 1) return { startDay: 1, endDay: 15 };
+  return { startDay: 16, endDay: getLastDayOfMonth(year, month) };
+}
+
 export function getCurrentPeriod(): PayrollPeriod {
   const now = new Date();
+  const quincena: 1 | 2 = now.getDate() <= 15 ? 1 : 2;
+  const days = getDefaultDays(quincena, now.getFullYear(), now.getMonth());
   return {
     year: now.getFullYear(),
     month: now.getMonth(),
-    quincena: now.getDate() <= 15 ? 1 : 2,
+    quincena,
+    startDay: days.startDay,
+    endDay: days.endDay,
   };
 }
 
@@ -34,21 +47,39 @@ export function getLastDayOfMonth(year: number, month: number): number {
 }
 
 export function getPeriodLabel(period: PayrollPeriod): string {
-  const lastDay = getLastDayOfMonth(period.year, period.month);
-  const startDay = period.quincena === 1 ? 1 : 16;
-  const endDay = period.quincena === 1 ? 15 : lastDay;
-  return `${startDay} al ${endDay} de ${MESES[period.month]} ${period.year}`;
+  return `${period.startDay} al ${period.endDay} de ${MESES[period.month]} ${period.year}`;
 }
 
 export function getMonthName(month: number): string {
   return MESES[month] || '';
 }
 
-export function calculateSalary(employee: DetailedEmployee): SalaryBreakdown {
-  const bonoPuntualidad = employee.bonoPuntualidad || 0;
-  const bonoObjetivos = employee.bonoObjetivos || 0;
-  const apoyoGasolina = employee.apoyoGasolina || 0;
-  const totalPercepciones = bonoPuntualidad + bonoObjetivos + apoyoGasolina;
+/** Días naturales en el periodo (endDay - startDay + 1) */
+export function getDaysInQuincena(period: PayrollPeriod): number {
+  return period.endDay - period.startDay + 1;
+}
+
+/**
+ * Calcula salario proporcional por quincena.
+ * Los bonos/apoyos son montos MENSUALES que se dividen entre 30 días,
+ * y se pagan según los días trabajados en la quincena.
+ */
+export function calculateSalary(
+  employee: DetailedEmployee,
+  diasTrabajados: number,
+  diasEnPeriodo: number,
+): SalaryBreakdown {
+  const monthlyBonoPuntualidad = employee.bonoPuntualidad || 0;
+  const monthlyBonoObjetivos = employee.bonoObjetivos || 0;
+  const monthlyApoyoGasolina = employee.apoyoGasolina || 0;
+
+  // Tasa diaria = monto mensual / 30
+  const factor = diasTrabajados / 30;
+
+  const bonoPuntualidad = Math.round(monthlyBonoPuntualidad * factor * 100) / 100;
+  const bonoObjetivos = Math.round(monthlyBonoObjetivos * factor * 100) / 100;
+  const apoyoGasolina = Math.round(monthlyApoyoGasolina * factor * 100) / 100;
+  const totalPercepciones = Math.round((bonoPuntualidad + bonoObjetivos + apoyoGasolina) * 100) / 100;
 
   return {
     bonoPuntualidad,
@@ -57,6 +88,8 @@ export function calculateSalary(employee: DetailedEmployee): SalaryBreakdown {
     totalPercepciones,
     totalDeducciones: 0,
     netoAPagar: totalPercepciones,
+    diasTrabajados,
+    diasEnPeriodo,
   };
 }
 
