@@ -9,18 +9,11 @@ import { DownloadIcon } from './icons/DownloadIcon';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMethodsForEmail } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../../src/firebaseConfig';
-import { employeesService, logsService, permissionsService, schedulesService, cleanDuplicateLogs } from '../../src/services/firestoreService';
+import { employeesService, logsService, permissionsService, cleanDuplicateLogs } from '../../src/services/firestoreService';
 import { useToast } from '../ui/Toast';
 
 interface AdminViewProps {
   onExit: () => void;
-}
-
-interface ScheduleConfig {
-  type: 'indeterminado' | 'determinado';
-  time: string;
-  startDate?: string;
-  endDate?: string;
 }
 
 const calculateTenure = (startDateString: string): string => {
@@ -55,6 +48,56 @@ const calculateTenure = (startDateString: string): string => {
   if (days > 0) parts.push(`${days} día${days > 1 ? 's' : ''}`);
   
   return parts.length > 0 ? parts.join(', ') : "Menos de un día";
+};
+
+// --- Helper functions for day-specific schedule detection ---
+const parseScheduleStartTime = (scheduleString: string): string | null => {
+  if (!scheduleString || scheduleString.toLowerCase().includes('no labora')) {
+    return null;
+  }
+  const parts = scheduleString.split('-');
+  if (parts.length >= 1) {
+    const startTime = parts[0].trim();
+    if (/^\d{2}:\d{2}$/.test(startTime)) {
+      return startTime;
+    }
+  }
+  return null;
+};
+
+const findDetailedEmployee = (
+  employeeName: string,
+  detailedEmployees: DetailedEmployee[]
+): DetailedEmployee | undefined => {
+  const normalizedName = employeeName.toUpperCase().replace(/\s+/g, ' ').trim();
+
+  const exactMatch = detailedEmployees.find(emp => {
+    const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`
+      .toUpperCase().replace(/\s+/g, ' ').trim();
+    return fullName === normalizedName;
+  });
+  if (exactMatch) return exactMatch;
+
+  return detailedEmployees.find(emp =>
+    normalizedName.includes(emp.paterno.toUpperCase()) &&
+    normalizedName.includes(emp.nombres.toUpperCase())
+  );
+};
+
+const getScheduleForDay = (employee: DetailedEmployee, dayOfWeek: number): string | null => {
+  switch (dayOfWeek) {
+    case 0: return null; // Domingo
+    case 1: // Lunes
+    case 2: // Martes
+    case 3: // Miércoles
+    case 5: // Viernes
+      return parseScheduleStartTime(employee.horarioLunesMiercolesViernes);
+    case 4: // Jueves
+      return parseScheduleStartTime(employee.horarioJueves);
+    case 6: // Sábado
+      return parseScheduleStartTime(employee.horarioSabado);
+    default: return null;
+  }
 };
 
 // --- Helper functions for permission time calculation ---
@@ -117,7 +160,6 @@ const generateTimeOptions = (): string[] => {
 export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const [allLogs, setAllLogs] = useState<LogEntry[]>([]);
   const toast = useToast();
-  const [schedules, setSchedules] = useState<{ [key: string]: ScheduleConfig }>({});
   const [detailedEmployees, setDetailedEmployees] = useState<DetailedEmployee[]>([]);
   const [permissionRequests, setPermissionRequests] = useState<PermissionRequest[]>([]);
   const timeOptions = useMemo(() => generateTimeOptions(), []);
@@ -191,34 +233,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
       setPermissionRequests(requests);
     });
 
-    const unsubscribeSchedules = schedulesService.subscribe((loadedSchedules) => {
-      const migratedSchedules: { [key: string]: ScheduleConfig } = {};
-      for (const empName in loadedSchedules) {
-        const value = loadedSchedules[empName];
-        if (typeof value === 'string') {
-          migratedSchedules[empName] = { type: 'indeterminado', time: value };
-        } else if (typeof value === 'object' && value.time) {
-          migratedSchedules[empName] = value;
-        }
-      }
-      if (Object.keys(migratedSchedules).length > 0) {
-        setSchedules(migratedSchedules);
-      } else {
-        // Default schedules si no hay datos
-        const defaultSchedules = EMPLOYEES.reduce((acc, emp) => {
-          acc[emp.name] = { type: 'indeterminado', time: emp.scheduleStartTime };
-          return acc;
-        }, {} as {[key: string]: ScheduleConfig});
-        setSchedules(defaultSchedules);
-      }
-    });
-
     // Cleanup: desuscribirse cuando el componente se desmonte
     return () => {
       unsubscribeLogs();
       unsubscribeEmployees();
       unsubscribePermissions();
-      unsubscribeSchedules();
     };
   }, []);
 
@@ -253,29 +272,27 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   }, [allLogs, startDate, endDate]);
 
   const getEffectiveScheduleTime = useCallback((employeeName: string, timestamp: number): string => {
-    const scheduleConfig = schedules[employeeName];
-    const defaultSchedule = EMPLOYEES.find(e => e.name === employeeName)?.scheduleStartTime || '09:00';
+    const logDate = new Date(timestamp);
+    const dayOfWeek = logDate.getDay();
 
-    if (!scheduleConfig) {
-      return defaultSchedule;
-    }
-
-    if (scheduleConfig.type === 'determinado' && scheduleConfig.startDate && scheduleConfig.endDate) {
-      const logDate = new Date(timestamp);
-      const logDateOnly = new Date(logDate.getFullYear(), logDate.getMonth(), logDate.getDate());
-
-      const startDate = new Date(scheduleConfig.startDate + 'T00:00:00');
-      const endDate = new Date(scheduleConfig.endDate + 'T00:00:00');
-
-      if (logDateOnly >= startDate && logDateOnly <= endDate) {
-        return scheduleConfig.time;
-      } else {
-        return defaultSchedule;
+    // 1. Buscar en DetailedEmployee (horarios por día)
+    const detailedEmp = findDetailedEmployee(employeeName, detailedEmployees);
+    if (detailedEmp) {
+      const daySchedule = getScheduleForDay(detailedEmp, dayOfWeek);
+      if (daySchedule === null) {
+        return ''; // "No labora" o domingo
       }
+      return daySchedule;
     }
 
-    return scheduleConfig.time || defaultSchedule;
-  }, [schedules]);
+    // 2. Fallback: EMPLOYEES constant (legacy)
+    const legacyEmployee = EMPLOYEES.find(e => e.name === employeeName);
+    if (legacyEmployee) {
+      return legacyEmployee.scheduleStartTime;
+    }
+
+    return '09:00';
+  }, [detailedEmployees]);
 
   const handleDownloadLogs = () => {
     const sortedLogs = [...filteredLogs].sort((a, b) => a.timestamp - b.timestamp);
@@ -339,36 +356,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const handleScheduleFormChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const { name, value } = e.target;
     setScheduleForm(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleScheduleChange = (employeeName: string, field: keyof ScheduleConfig, value: string) => {
-    setSchedules(prev => {
-        const currentSchedule = prev[employeeName] || {
-            type: 'indeterminado',
-            time: EMPLOYEES.find(e => e.name === employeeName)?.scheduleStartTime || '09:00',
-            startDate: '',
-            endDate: '',
-        };
-
-        const newSchedule = { ...currentSchedule, [field]: value };
-
-        if (field === 'type' && value === 'indeterminado') {
-            newSchedule.startDate = '';
-            newSchedule.endDate = '';
-        }
-
-        return { ...prev, [employeeName]: newSchedule };
-    });
-  };
-
-  const saveSchedules = async () => {
-    try {
-      await schedulesService.save(schedules);
-      toast.success('Horarios guardados.');
-    } catch (error) {
-      console.error('Error al guardar horarios:', error);
-      toast.error('Error al guardar horarios. Intenta de nuevo.');
-    }
   };
 
   const handleCleanDuplicates = async () => {
@@ -1097,60 +1084,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
             </div>
         </div>
 
-        {/* Gestión */}
+        {/* Horas Pendientes */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-           <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
-                <h2 className="text-xl font-bold text-slate-800 mb-4">Gestión de Horarios</h2>
-                <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
-                    {EMPLOYEES.map(emp => {
-                      const currentSchedule = schedules[emp.name] || { type: 'indeterminado', time: emp.scheduleStartTime };
-                      return (
-                        <div key={emp.name} className="p-3 bg-slate-50/50 rounded-md border border-slate-200 space-y-2">
-                            <label className="text-sm text-slate-800 font-medium block">{emp.name}</label>
-                            <div className="grid grid-cols-2 gap-2">
-                              <select
-                                  value={currentSchedule.type}
-                                  onChange={e => handleScheduleChange(emp.name, 'type', e.target.value)}
-                                  className="w-full px-2 py-1 bg-white/40 border border-slate-300 rounded-md shadow-sm text-sm"
-                              >
-                                  <option value="indeterminado">Indeterminado</option>
-                                  <option value="determinado">Determinado</option>
-                              </select>
-                              <input
-                                  type="time"
-                                  value={currentSchedule.time}
-                                  onChange={e => handleScheduleChange(emp.name, 'time', e.target.value)}
-                                  className="w-full px-2 py-1 bg-white/40 border border-slate-300 rounded-md shadow-sm text-sm"
-                              />
-                            </div>
-                            {currentSchedule.type === 'determinado' && (
-                              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 mt-2">
-                                  <div>
-                                      <label className="text-xs text-slate-600 block mb-1">Desde</label>
-                                      <input
-                                          type="date"
-                                          value={currentSchedule.startDate || ''}
-                                          onChange={e => handleScheduleChange(emp.name, 'startDate', e.target.value)}
-                                          className="w-full px-2 py-1 bg-white/40 border border-slate-300 rounded-md shadow-sm text-sm"
-                                      />
-                                  </div>
-                                  <div>
-                                      <label className="text-xs text-slate-600 block mb-1">Hasta</label>
-                                      <input
-                                          type="date"
-                                          value={currentSchedule.endDate || ''}
-                                          onChange={e => handleScheduleChange(emp.name, 'endDate', e.target.value)}
-                                          className="w-full px-2 py-1 bg-white/40 border border-slate-300 rounded-md shadow-sm text-sm"
-                                      />
-                                  </div>
-                              </div>
-                            )}
-                        </div>
-                      )
-                    })}
-                </div>
-                <button onClick={saveSchedules} className="mt-4 w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700">Guardar Horarios</button>
-            </div>
             <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
                 <h2 className="text-xl font-bold text-slate-800 mb-4">Resumen de Horas Pendientes por Reponer</h2>
                 <div className="space-y-3 max-h-96 overflow-y-auto pr-2">

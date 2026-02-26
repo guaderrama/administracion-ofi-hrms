@@ -41,32 +41,34 @@ export const IncidentsReport: React.FC<IncidentsReportProps> = ({ logs, getEffec
             // 1. Verificar retardos
             if (checkIn) {
                 const scheduleTime = getEffectiveScheduleTime(employeeName, checkIn.timestamp);
-                const checkInTime = new Date(checkIn.timestamp);
-                const [hours, minutes] = scheduleTime.split(':').map(Number);
-                const scheduleDate = new Date(checkIn.timestamp);
-                scheduleDate.setHours(hours, minutes, 0, 0);
-                
-                // 10 minutos de tolerancia
-                const toleranceDeadline = new Date(scheduleDate.getTime() + 10 * 60 * 1000);
+                if (scheduleTime) {
+                    const checkInTime = new Date(checkIn.timestamp);
+                    const [hours, minutes] = scheduleTime.split(':').map(Number);
+                    const scheduleDate = new Date(checkIn.timestamp);
+                    scheduleDate.setHours(hours, minutes, 0, 0);
 
-                if (checkInTime > toleranceDeadline) {
-                    const lateMinutes = Math.round((checkInTime.getTime() - scheduleDate.getTime()) / 60000);
-                    
-                    const h = Math.floor(lateMinutes / 60);
-                    const m = lateMinutes % 60;
-                    
-                    let details = 'Llegó ';
-                    if (h > 0) {
-                        details += `${h}h `;
+                    // 10 minutos de tolerancia
+                    const toleranceDeadline = new Date(scheduleDate.getTime() + 10 * 60 * 1000);
+
+                    if (checkInTime > toleranceDeadline) {
+                        const lateMinutes = Math.round((checkInTime.getTime() - scheduleDate.getTime()) / 60000);
+
+                        const h = Math.floor(lateMinutes / 60);
+                        const m = lateMinutes % 60;
+
+                        let details = 'Llegó ';
+                        if (h > 0) {
+                            details += `${h}h `;
+                        }
+                        details += `${m}m tarde.`;
+
+                        incidents.push({
+                            employeeName,
+                            date,
+                            type: IncidentType.LATE_ARRIVAL,
+                            details: details
+                        });
                     }
-                    details += `${m}m tarde.`;
-
-                    incidents.push({
-                        employeeName,
-                        date,
-                        type: IncidentType.LATE_ARRIVAL,
-                        details: details
-                    });
                 }
             }
             
