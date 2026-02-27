@@ -1,22 +1,21 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
-import { employeesService } from '../src/services/firestoreService';
+import { employeesService, logsService } from '../src/services/firestoreService';
 import { NominasPdfPreview } from './NominasPdfPreview';
 import {
   PayrollPeriod,
   getCurrentPeriod,
   getPeriodLabel,
-  getMonthName,
   calculateSalary,
   calculateVacation,
   formatCurrency,
   formatDateShort,
   getEmployeeFullName,
   getDaysInQuincena,
-  getDefaultDays,
-  getLastDayOfMonth,
+  getDefaultPeriod,
 } from './nominasUtils';
-import type { DetailedEmployee } from '../types';
+import type { DetailedEmployee, LogEntry } from '../types';
+import { LogType } from '../types';
 import { AccessDenied } from './ui/AccessDenied';
 import { StatusBadge } from './ui/StatusBadge';
 import { Card } from './ui/Card';
@@ -35,7 +34,6 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const [selectedEmployee, setSelectedEmployee] = useState<DetailedEmployee | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingProgress, setGeneratingProgress] = useState({ current: 0, total: 0 });
-  // Días trabajados por empleado: { employeeId: diasTrabajados }
   const [daysWorked, setDaysWorked] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -43,19 +41,83 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     return () => unsubscribe();
   }, []);
 
-  // Días del periodo actual
   const diasEnPeriodo = getDaysInQuincena(selectedPeriod);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
 
-  // Resetear días trabajados al máximo cuando cambia el periodo o empleados
+  // Calcular días trabajados desde registros de asistencia
   useEffect(() => {
-    const updated: Record<string, number> = {};
-    employees.forEach((emp) => {
-      updated[emp.id] = diasEnPeriodo;
-    });
-    setDaysWorked(updated);
-  }, [employees, diasEnPeriodo]);
+    if (employees.length === 0) return;
 
-  // Access control
+    const fetchAttendance = async () => {
+      setLoadingAttendance(true);
+      try {
+        const startDate = new Date(selectedPeriod.startDate + 'T00:00:00');
+        const endDate = new Date(selectedPeriod.endDate + 'T23:59:59');
+        const logs = await logsService.getByDateRange(startDate, endDate);
+
+        // Filtrar solo entradas
+        const entradas = logs.filter((log: LogEntry) => log.type === LogType.ENTRADA);
+
+        // Calcular días de descanso en el periodo (domingos + sábados según horario)
+        const sundaysInPeriod: string[] = [];
+        const saturdaysInPeriod: string[] = [];
+        const cursor = new Date(selectedPeriod.startDate + 'T00:00:00');
+        const endLimit = new Date(selectedPeriod.endDate + 'T00:00:00');
+        while (cursor <= endLimit) {
+          const key = `${cursor.getFullYear()}-${cursor.getMonth()}-${cursor.getDate()}`;
+          if (cursor.getDay() === 0) sundaysInPeriod.push(key);   // Domingo
+          if (cursor.getDay() === 6) saturdaysInPeriod.push(key); // Sábado
+          cursor.setDate(cursor.getDate() + 1);
+        }
+
+        // Contar días únicos con entrada por empleado + días de descanso pagados
+        const updated: Record<string, number> = {};
+        employees.forEach((emp) => {
+          const empFullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
+
+          // Buscar logs que coincidan con este empleado
+          const empEntradas = entradas.filter((log: LogEntry) => {
+            const logName = log.employeeName.toUpperCase().trim();
+            return logName === empFullName ||
+              (logName.includes(emp.paterno.toUpperCase()) &&
+               logName.includes(emp.nombres.toUpperCase()));
+          });
+
+          // Días únicos con entrada
+          const workedDays = new Set(
+            empEntradas.map((log: LogEntry) => {
+              const d = new Date(log.timestamp);
+              return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+            })
+          );
+
+          // Domingos siempre se pagan como descanso
+          sundaysInPeriod.forEach((d) => workedDays.add(d));
+
+          // Sábados se pagan si el empleado no labora ese día
+          const noLaboraSabado = emp.horarioSabado?.toLowerCase().includes('no labora');
+          if (noLaboraSabado) {
+            saturdaysInPeriod.forEach((d) => workedDays.add(d));
+          }
+
+          updated[emp.id] = Math.min(workedDays.size, diasEnPeriodo);
+        });
+
+        setDaysWorked(updated);
+      } catch (error) {
+        console.error('Error cargando asistencia:', error);
+        // Fallback: poner todos los días del periodo
+        const fallback: Record<string, number> = {};
+        employees.forEach((emp) => { fallback[emp.id] = diasEnPeriodo; });
+        setDaysWorked(fallback);
+      } finally {
+        setLoadingAttendance(false);
+      }
+    };
+
+    fetchAttendance();
+  }, [employees, selectedPeriod.startDate, selectedPeriod.endDate, diasEnPeriodo]);
+
   if (!user) {
     return <AccessDenied icon="🔒" title="Acceso Restringido" message="Debes iniciar sesión para acceder a esta sección." onBack={() => setView('dashboard')} />;
   }
@@ -65,7 +127,6 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   }
 
   const generatePdf = async (employee: DetailedEmployee) => {
-    // Wait for React to render the preview
     await new Promise(resolve => setTimeout(resolve, 200));
 
     const content = document.getElementById('pdf-content-nomina');
@@ -89,7 +150,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
 
     pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
 
-    const periodStr = `${selectedPeriod.year}_${String(selectedPeriod.month + 1).padStart(2, '0')}_Q${selectedPeriod.quincena}`;
+    const periodStr = `${selectedPeriod.startDate}_${selectedPeriod.endDate}_Q${selectedPeriod.quincena}`;
     const fileName = `nomina_${employee.paterno}_${employee.materno}_${employee.nombres}_${periodStr}.pdf`.replace(/\s/g, '_');
     pdf.save(fileName);
   };
@@ -141,9 +202,10 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     );
   }, [employees, daysWorked, diasEnPeriodo]);
 
-  const currentYear = new Date().getFullYear();
-  const years = [currentYear, currentYear - 1];
-  const months = Array.from({ length: 12 }, (_, i) => i);
+  // Para los botones de quincena rápida, derivar año/mes actual de la fecha inicio
+  const periodoDate = new Date(selectedPeriod.startDate + 'T00:00:00');
+  const currentRefYear = periodoDate.getFullYear();
+  const currentRefMonth = periodoDate.getMonth();
 
   return (
     <div className="container mx-auto p-4 sm:p-6 lg:p-8 font-sans">
@@ -157,44 +219,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       <Card title="Periodo de Nómina" className="mb-6">
         <div className="flex flex-wrap gap-4 items-end">
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Año</label>
-            <select
-              value={selectedPeriod.year}
-              onChange={(e) => {
-                const year = parseInt(e.target.value);
-                const days = getDefaultDays(selectedPeriod.quincena, year, selectedPeriod.month);
-                setSelectedPeriod({ ...selectedPeriod, year, ...days });
-              }}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-            >
-              {years.map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Mes</label>
-            <select
-              value={selectedPeriod.month}
-              onChange={(e) => {
-                const month = parseInt(e.target.value);
-                const days = getDefaultDays(selectedPeriod.quincena, selectedPeriod.year, month);
-                setSelectedPeriod({ ...selectedPeriod, month, ...days });
-              }}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-            >
-              {months.map(m => (
-                <option key={m} value={m}>{getMonthName(m)}</option>
-              ))}
-            </select>
-          </div>
-          <div>
             <label className="block text-sm font-medium text-slate-600 mb-1">Quincena</label>
             <div className="flex rounded-lg overflow-hidden border border-slate-300">
               <button
                 onClick={() => {
-                  const days = getDefaultDays(1, selectedPeriod.year, selectedPeriod.month);
-                  setSelectedPeriod({ ...selectedPeriod, quincena: 1, ...days });
+                  setSelectedPeriod(getDefaultPeriod(1, currentRefYear, currentRefMonth));
                 }}
                 className={`px-4 py-2 text-sm font-medium transition-colors ${
                   selectedPeriod.quincena === 1
@@ -206,8 +235,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
               </button>
               <button
                 onClick={() => {
-                  const days = getDefaultDays(2, selectedPeriod.year, selectedPeriod.month);
-                  setSelectedPeriod({ ...selectedPeriod, quincena: 2, ...days });
+                  setSelectedPeriod(getDefaultPeriod(2, currentRefYear, currentRefMonth));
                 }}
                 className={`px-4 py-2 text-sm font-medium transition-colors border-l border-slate-300 ${
                   selectedPeriod.quincena === 2
@@ -220,33 +248,31 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Del día</label>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Fecha Inicio</label>
             <input
-              type="number"
-              min={1}
-              max={selectedPeriod.endDay}
-              value={selectedPeriod.startDay}
+              type="date"
+              value={selectedPeriod.startDate}
+              max={selectedPeriod.endDate}
               onChange={(e) => {
-                const lastDay = getLastDayOfMonth(selectedPeriod.year, selectedPeriod.month);
-                const val = Math.max(1, Math.min(selectedPeriod.endDay, parseInt(e.target.value) || 1));
-                setSelectedPeriod({ ...selectedPeriod, startDay: Math.min(val, lastDay) });
+                if (e.target.value) {
+                  setSelectedPeriod({ ...selectedPeriod, startDate: e.target.value });
+                }
               }}
-              className="w-16 text-center px-2 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Al día</label>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Fecha Fin</label>
             <input
-              type="number"
-              min={selectedPeriod.startDay}
-              max={getLastDayOfMonth(selectedPeriod.year, selectedPeriod.month)}
-              value={selectedPeriod.endDay}
+              type="date"
+              value={selectedPeriod.endDate}
+              min={selectedPeriod.startDate}
               onChange={(e) => {
-                const lastDay = getLastDayOfMonth(selectedPeriod.year, selectedPeriod.month);
-                const val = Math.max(selectedPeriod.startDay, Math.min(lastDay, parseInt(e.target.value) || 1));
-                setSelectedPeriod({ ...selectedPeriod, endDay: val });
+                if (e.target.value) {
+                  setSelectedPeriod({ ...selectedPeriod, endDate: e.target.value });
+                }
               }}
-              className="w-16 text-center px-2 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
             />
           </div>
           <div className="ml-auto">
@@ -262,6 +288,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold text-slate-800">
             Colaboradores ({employees.length})
+            {loadingAttendance && <span className="ml-2 text-sm font-normal text-amber-600">Cargando asistencia...</span>}
           </h2>
           <button
             onClick={handleGenerateAll}
@@ -361,7 +388,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         )}
       </Card>
 
-      {/* PDF Preview (hidden off-screen for capture, visible when selected) */}
+      {/* PDF Preview */}
       {selectedEmployee && (
         <div className="mb-6">
           <div className="flex justify-between items-center mb-4">

@@ -6,8 +6,6 @@ import {
   formatCurrency,
   getPeriodLabel,
   getEmployeeFullName,
-  getLastDayOfMonth,
-  getMonthName,
   getDaysInQuincena,
 } from './nominasUtils';
 
@@ -17,19 +15,21 @@ interface NominasPdfPreviewProps {
   diasTrabajados: number;
 }
 
+const MESES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
 function formatDate(dateStr: string): string {
   if (!dateStr) return 'N/A';
   const [year, month, day] = dateStr.split('-');
-  const months = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-  ];
   const monthIdx = parseInt(month, 10) - 1;
-  return `${parseInt(day, 10)} de ${months[monthIdx]} ${year}`;
+  return `${parseInt(day, 10)} de ${MESES[monthIdx]} ${year}`;
 }
 
 function getPaymentDate(period: PayrollPeriod): string {
-  return `${period.endDay} de ${getMonthName(period.month)} ${period.year}`;
+  const end = new Date(period.endDate + 'T00:00:00');
+  return `${end.getDate()} de ${MESES[end.getMonth()]} ${end.getFullYear()}`;
 }
 
 export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados }) => {

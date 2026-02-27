@@ -1,11 +1,9 @@
 import type { DetailedEmployee } from '../types';
 
 export interface PayrollPeriod {
-  year: number;
-  month: number; // 0-11 (JavaScript month)
-  quincena: 1 | 2; // 1 = primera quincena, 2 = segunda quincena
-  startDay: number; // día inicio del periodo (editable)
-  endDay: number;   // día fin del periodo (editable)
+  quincena: 1 | 2;
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
 }
 
 export interface SalaryBreakdown {
@@ -24,39 +22,47 @@ const MESES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
 ];
 
-export function getDefaultDays(quincena: 1 | 2, year: number, month: number): { startDay: number; endDay: number } {
-  if (quincena === 1) return { startDay: 1, endDay: 15 };
-  return { startDay: 16, endDay: getLastDayOfMonth(year, month) };
+/** Formato YYYY-MM-DD a partir de año, mes (0-11), día */
+function toDateStr(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export function getDefaultPeriod(quincena: 1 | 2, year: number, month: number): PayrollPeriod {
+  if (quincena === 1) {
+    return { quincena, startDate: toDateStr(year, month, 1), endDate: toDateStr(year, month, 15) };
+  }
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return { quincena, startDate: toDateStr(year, month, 16), endDate: toDateStr(year, month, lastDay) };
 }
 
 export function getCurrentPeriod(): PayrollPeriod {
   const now = new Date();
   const quincena: 1 | 2 = now.getDate() <= 15 ? 1 : 2;
-  const days = getDefaultDays(quincena, now.getFullYear(), now.getMonth());
-  return {
-    year: now.getFullYear(),
-    month: now.getMonth(),
-    quincena,
-    startDay: days.startDay,
-    endDay: days.endDay,
-  };
-}
-
-export function getLastDayOfMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate();
+  return getDefaultPeriod(quincena, now.getFullYear(), now.getMonth());
 }
 
 export function getPeriodLabel(period: PayrollPeriod): string {
-  return `${period.startDay} al ${period.endDay} de ${MESES[period.month]} ${period.year}`;
+  const start = new Date(period.startDate + 'T00:00:00');
+  const end = new Date(period.endDate + 'T00:00:00');
+  const startStr = `${start.getDate()} de ${MESES[start.getMonth()]}`;
+  const endStr = `${end.getDate()} de ${MESES[end.getMonth()]} ${end.getFullYear()}`;
+  // Si mismo mes, simplificar
+  if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()) {
+    return `${start.getDate()} al ${end.getDate()} de ${MESES[start.getMonth()]} ${start.getFullYear()}`;
+  }
+  return `${startStr} al ${endStr}`;
 }
 
 export function getMonthName(month: number): string {
   return MESES[month] || '';
 }
 
-/** Días naturales en el periodo (endDay - startDay + 1) */
+/** Días naturales en el periodo */
 export function getDaysInQuincena(period: PayrollPeriod): number {
-  return period.endDay - period.startDay + 1;
+  const start = new Date(period.startDate + 'T00:00:00');
+  const end = new Date(period.endDate + 'T00:00:00');
+  const diffMs = end.getTime() - start.getTime();
+  return Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
 }
 
 /**
