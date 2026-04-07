@@ -13,6 +13,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Helper: admin or supervisor
+    function isAdminOrSupervisor() {
+      let role = get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return request.auth != null && (role == 'admin' || role == 'supervisor');
+    }
+
     // Users collection
     match /users/{userId} {
       // Permitir lectura a usuarios autenticados (para verificar si es el primer usuario)
@@ -78,6 +84,31 @@ service cloud.firestore {
     match /menu_config/{docId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
+    }
+
+    // App Settings collection (tolerancia, mensajes motivacionales)
+    match /app_settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Tardiness Adjustments collection (ajustes de retardos)
+    match /tardiness_adjustments/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Announcements collection (anuncios)
+    match /announcements/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdminOrSupervisor();
+      allow update, delete: if isAdmin();
+    }
+
+    // Payroll Cuts collection (cortes de nomina)
+    match /payroll_cuts/{docId} {
+      allow read: if isAuthenticated();
+      allow create, delete: if isAdmin();
     }
   }
 }

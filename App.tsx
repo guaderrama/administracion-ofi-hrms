@@ -9,12 +9,13 @@ import { ChecadorPage } from './components/checador/ChecadorPage';
 import { DashboardPage } from './components/DashboardPage';
 import { AdminPage } from './components/AdminPage';
 import { NominasPage } from './components/NominasPage';
+import { UserManagementPage } from './components/UserManagementPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { useAuth } from './src/contexts/AuthContext';
 import { LoadingSpinner } from './components/ui/LoadingSpinner';
 
 const App: React.FC = () => {
-  const { user, loading, isAdmin } = useAuth();
+  const { user, loading, isAdmin, canViewAll, canEdit } = useAuth();
   const [currentView, setCurrentView] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -29,15 +30,19 @@ const App: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Proteger rutas de admin - redirigir si no es admin
+  // Proteger rutas - redirigir si no tiene permisos
   useEffect(() => {
-    if (!loading && user && !isAdmin) {
-      const adminOnlyRoutes = ['admin', 'requisitions', 'nominas'];
-      if (adminOnlyRoutes.includes(currentView)) {
+    if (!loading && user && !canViewAll) {
+      const restrictedRoutes = ['admin', 'requisitions', 'nominas', 'user-management'];
+      if (restrictedRoutes.includes(currentView)) {
         setCurrentView('dashboard');
       }
     }
-  }, [currentView, isAdmin, loading, user]);
+    // user-management solo para admin (supervisor no puede gestionar usuarios)
+    if (!loading && user && !isAdmin && currentView === 'user-management') {
+      setCurrentView('dashboard');
+    }
+  }, [currentView, isAdmin, canViewAll, loading, user]);
 
   const renderView = () => {
     // Enrutamiento simple basado en el string de la vista
@@ -59,19 +64,23 @@ const App: React.FC = () => {
         // Futuras vistas de RH podrían ir aquí
         return <div className="p-8 text-center"><p>Seleccione una herramienta de Recursos Humanos.</p></div>;
       case 'requisitions':
-         // Solo admin puede ver requisiciones
-        if (!isAdmin) return <DashboardPage />;
+         // Admin y supervisor pueden ver requisiciones
+        if (!canViewAll) return <DashboardPage />;
         return <RequisitionsPage />;
       case 'checador':
         return <ChecadorPage />;
       case 'admin':
-        // Solo admin puede ver el panel de administrador
-        if (!isAdmin) return <DashboardPage />;
+        // Admin y supervisor pueden ver el panel
+        if (!canViewAll) return <DashboardPage />;
         return <AdminPage setView={setCurrentView} />;
       case 'nominas':
-        // Solo admin puede ver nóminas
-        if (!isAdmin) return <DashboardPage />;
+        // Admin y supervisor pueden ver nominas
+        if (!canViewAll) return <DashboardPage />;
         return <NominasPage setView={setCurrentView} />;
+      case 'user-management':
+        // Solo admin puede gestionar usuarios
+        if (!isAdmin) return <DashboardPage />;
+        return <UserManagementPage setView={setCurrentView} />;
       default:
         // Vista por defecto si ninguna coincide
         return <DashboardPage />;

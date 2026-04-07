@@ -422,7 +422,7 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
       <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 space-y-4">
         <h3 className="text-lg leading-6 font-medium text-slate-800">Detalles del Permiso</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <InputField label="Fecha de Solicitud" id="requestDate" type="date" value={formData.requestDate} onChange={handleChange} />
+            <InputField label="Fecha de Solicitud" id="requestDate" type="date" value={formData.requestDate} onChange={handleChange} readOnly />
             <SelectField label="Tipo de Permiso" id="permissionType" value={formData.permissionType} onChange={handlePermissionTypeChange} options={PERMISSION_TYPE_OPTIONS} />
         </div>
         {renderPermissionDetails()}

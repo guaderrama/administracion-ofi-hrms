@@ -61,6 +61,22 @@ export interface PermissionRequest {
   compensationMinutesPerDay?: number;
 
   additionalNotes?: string;
+
+  // Flujo de aprobacion en 2 pasos
+  supervisorApproval?: {
+    status: 'pendiente' | 'aprobado' | 'denegado';
+    by?: string;       // email del supervisor
+    byName?: string;   // nombre del supervisor
+    date?: string;     // ISO date
+    comment?: string;
+  };
+  adminApproval?: {
+    status: 'pendiente' | 'aprobado' | 'denegado';
+    by?: string;
+    byName?: string;
+    date?: string;
+    comment?: string;
+  };
 }
 
 export interface VacationRequest {

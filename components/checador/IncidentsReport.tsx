@@ -5,6 +5,7 @@ import { IncidentType, LogType } from '../../types';
 interface IncidentsReportProps {
   logs: LogEntry[];
   getEffectiveScheduleTime: (employeeName: string, timestamp: number) => string;
+  toleranceMinutes?: number;
 }
 
 interface Incident {
@@ -14,7 +15,7 @@ interface Incident {
     details: string;
 }
 
-export const IncidentsReport: React.FC<IncidentsReportProps> = ({ logs, getEffectiveScheduleTime }) => {
+export const IncidentsReport: React.FC<IncidentsReportProps> = ({ logs, getEffectiveScheduleTime, toleranceMinutes = 10 }) => {
     const incidents = useMemo(() => {
         const incidents: Incident[] = [];
         const groupedLogs: { [key: string]: LogEntry[] } = {};
@@ -48,7 +49,7 @@ export const IncidentsReport: React.FC<IncidentsReportProps> = ({ logs, getEffec
                     scheduleDate.setHours(hours, minutes, 0, 0);
 
                     // 10 minutos de tolerancia
-                    const toleranceDeadline = new Date(scheduleDate.getTime() + 10 * 60 * 1000);
+                    const toleranceDeadline = new Date(scheduleDate.getTime() + toleranceMinutes * 60 * 1000);
 
                     if (checkInTime > toleranceDeadline) {
                         const lateMinutes = Math.round((checkInTime.getTime() - scheduleDate.getTime()) / 60000);

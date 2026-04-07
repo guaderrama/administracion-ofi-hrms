@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { PermissionForm } from './PermissionForm';
 import { PdfPreview } from './PdfPreview';
+import { permissionsService } from '../src/services/firestoreService';
+import { useToast } from './ui/Toast';
 import type { PermissionRequest } from '../types';
 
 // Declare jspdf and html2canvas from global scope (loaded via CDN)
@@ -8,12 +10,25 @@ declare const jspdf: any;
 declare const html2canvas: any;
 
 export const PermissionGeneratorPage: React.FC = () => {
+  const toast = useToast();
   const [permissionData, setPermissionData] = useState<Omit<PermissionRequest, 'id' | 'status'> | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [formKey, setFormKey] = useState<number>(0);
 
-  const handleFormSubmit = (data: Omit<PermissionRequest, 'id' | 'status'>) => {
+  const handleFormSubmit = async (data: Omit<PermissionRequest, 'id' | 'status'>) => {
     setPermissionData(data);
+
+    // Guardar automaticamente en Firestore
+    try {
+      await permissionsService.create({
+        ...data,
+        status: 'Pendiente',
+      });
+      toast.success('Solicitud de permiso registrada exitosamente.');
+    } catch (error) {
+      console.error('Error al guardar solicitud:', error);
+      toast.error('Error al guardar la solicitud en el sistema.');
+    }
   };
 
   const handleReset = () => {

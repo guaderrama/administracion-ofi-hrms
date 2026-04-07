@@ -15,7 +15,7 @@ import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 
 // Tipos de roles
-export type UserRole = 'admin' | 'employee';
+export type UserRole = 'admin' | 'supervisor' | 'employee';
 
 // Datos del usuario en Firestore
 export interface UserData {
@@ -33,6 +33,9 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   isAdmin: boolean;
+  isSupervisor: boolean;
+  canEdit: boolean;       // admin only - puede modificar datos
+  canViewAll: boolean;    // admin + supervisor - puede ver todo
   login: (email: string, password: string) => Promise<UserCredential>;
   register: (email: string, password: string) => Promise<UserCredential>;
   logout: () => Promise<void>;
@@ -46,6 +49,9 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   error: null,
   isAdmin: false,
+  isSupervisor: false,
+  canEdit: false,
+  canViewAll: false,
   login: async () => { throw new Error('AuthProvider not initialized'); },
   register: async () => { throw new Error('AuthProvider not initialized'); },
   logout: async () => { throw new Error('AuthProvider not initialized'); },
@@ -243,12 +249,16 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
   };
 
   // Valor del contexto
+  const role = userData?.role;
   const value: AuthContextType = {
     user,
     userData,
     loading,
     error,
-    isAdmin: userData?.role === 'admin',
+    isAdmin: role === 'admin',
+    isSupervisor: role === 'supervisor',
+    canEdit: role === 'admin',
+    canViewAll: role === 'admin' || role === 'supervisor',
     login,
     register,
     logout,

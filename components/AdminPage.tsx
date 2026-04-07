@@ -8,7 +8,7 @@ interface AdminPageProps {
 }
 
 export const AdminPage: React.FC<AdminPageProps> = ({ setView }) => {
-    const { isAdmin, user } = useAuth();
+    const { canViewAll, user } = useAuth();
 
     const handleExit = () => {
         setView('dashboard');
@@ -18,8 +18,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ setView }) => {
         return <AccessDenied icon="🔒" title="Acceso Restringido" message="Debes iniciar sesión para acceder a esta página." onBack={() => setView('dashboard')} />;
     }
 
-    if (!isAdmin) {
-        return <AccessDenied message="No tienes permisos de administrador para acceder a esta sección." onBack={() => setView('dashboard')} />;
+    if (!canViewAll) {
+        return <AccessDenied message="No tienes permisos para acceder a esta sección." onBack={() => setView('dashboard')} />;
     }
 
     return <AdminView onExit={handleExit} />;

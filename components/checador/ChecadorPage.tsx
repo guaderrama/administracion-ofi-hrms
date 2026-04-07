@@ -36,6 +36,10 @@ export const ChecadorPage: React.FC = () => {
     // Estado para diálogo de confirmación
     const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; income: IncomeEntry | null }>({ isOpen: false, income: null });
 
+    // Proteccion contra doble click en checador
+    const [isProcessingLog, setIsProcessingLog] = useState(false);
+    const [logConfirm, setLogConfirm] = useState<{ isOpen: boolean; type: LogType | null }>({ isOpen: false, type: null });
+
     // Cargar empleados desde Firestore
     useEffect(() => {
         const unsubscribe = employeesService.subscribe((employees) => {
@@ -234,8 +238,25 @@ export const ChecadorPage: React.FC = () => {
         setClockStatus(ClockStatus.OUT_OF_OFFICE);
     }
 
+    const logTypeLabels: Record<string, string> = {
+        [LogType.ENTRADA]: 'Registrar Entrada',
+        [LogType.INICIO_COMIDA]: 'Iniciar Comida',
+        [LogType.FIN_COMIDA]: 'Terminar Comida',
+        [LogType.SALIDA]: 'Registrar Salida',
+    };
+
     const handleLog = (type: LogType) => {
-        if (!authenticatedEmployee) return;
+        if (!authenticatedEmployee || isProcessingLog) return;
+        // Mostrar confirmacion antes de registrar
+        setLogConfirm({ isOpen: true, type });
+    };
+
+    const confirmLog = () => {
+        const type = logConfirm.type;
+        setLogConfirm({ isOpen: false, type: null });
+        if (!type || !authenticatedEmployee || isProcessingLog) return;
+
+        setIsProcessingLog(true);
 
         navigator.geolocation.getCurrentPosition(
             (position) => {
@@ -247,7 +268,6 @@ export const ChecadorPage: React.FC = () => {
             },
             (error) => {
                 console.error("Error obteniendo la geolocalización:", error);
-                // Continuar sin ubicación si el usuario la deniega o hay un error
                 saveLog(type);
             },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
@@ -255,7 +275,10 @@ export const ChecadorPage: React.FC = () => {
     };
 
     const saveLog = async (type: LogType, location?: Location) => {
-        if (!authenticatedEmployee) return;
+        if (!authenticatedEmployee) {
+            setIsProcessingLog(false);
+            return;
+        }
 
         const newLog: LogEntry = {
             employeeName: authenticatedEmployee.name,
@@ -265,14 +288,14 @@ export const ChecadorPage: React.FC = () => {
         };
 
         try {
-            // Guardar en Firestore (fuente de verdad)
             await logsService.create(newLog);
-
-            // Recargar desde Firestore para actualizar estado
-            loadDailyLogs(authenticatedEmployee);
+            await loadDailyLogs(authenticatedEmployee);
+            toast.success(`${logTypeLabels[type] || type} registrado correctamente.`);
         } catch (error) {
             console.error('Error al guardar registro:', error);
             toast.error('Error al guardar registro. Intenta de nuevo.');
+        } finally {
+            setIsProcessingLog(false);
         }
     };
 
@@ -347,7 +370,7 @@ export const ChecadorPage: React.FC = () => {
                         <button onClick={handleLogout} className="text-sm text-amber-600 hover:underline">Cerrar sesión</button>
                     </div>
                     {owedHours > 0 && <OwedHoursDisplay hours={owedHours} />}
-                    <ActionButtons status={clockStatus} onLog={handleLog} />
+                    <ActionButtons status={clockStatus} onLog={handleLog} disabled={isProcessingLog} />
                     <LogTable logs={dailyLogs} />
                     
                     <div className="border-t-2 border-slate-300/60 pt-8"></div>
@@ -383,6 +406,18 @@ export const ChecadorPage: React.FC = () => {
                     onClose={() => setSelectedEmployee(null)}
                 />
             )}
+
+            {/* Confirmacion para registrar asistencia */}
+            <ConfirmDialog
+                isOpen={logConfirm.isOpen}
+                title={logConfirm.type ? logTypeLabels[logConfirm.type] || 'Confirmar' : 'Confirmar'}
+                message={`¿Confirmas que deseas ${logConfirm.type ? (logTypeLabels[logConfirm.type] || '').toLowerCase() : ''}?`}
+                variant="info"
+                onConfirm={confirmLog}
+                onCancel={() => setLogConfirm({ isOpen: false, type: null })}
+                confirmText="Confirmar"
+                cancelText="Cancelar"
+            />
 
             {/* Diálogo de confirmación para eliminar ingreso */}
             <ConfirmDialog

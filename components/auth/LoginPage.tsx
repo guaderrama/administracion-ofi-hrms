@@ -1,18 +1,16 @@
 // LoginPage - Página de autenticación
-// Permite login y registro de usuarios con Firebase Auth
+// Solo permite login con Firebase Auth (registro deshabilitado)
 
 import React, { useState } from 'react';
 import { useAuth } from '../../src/contexts/AuthContext';
 
 export const LoginPage: React.FC = () => {
-  const { login, register, resetPassword, error: authError, loading } = useAuth();
-  const [isLogin, setIsLogin] = useState(true);
+  const { login, resetPassword, error: authError, loading } = useAuth();
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetSuccess, setResetSuccess] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -28,12 +26,6 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
-    if (!isLogin && password !== confirmPassword) {
-      setError('Las contraseñas no coinciden');
-      setIsSubmitting(false);
-      return;
-    }
-
     if (password.length < 6) {
       setError('La contraseña debe tener al menos 6 caracteres');
       setIsSubmitting(false);
@@ -41,18 +33,12 @@ export const LoginPage: React.FC = () => {
     }
 
     try {
-      if (isLogin) {
-        await login(email, password);
-      } else {
-        await register(email, password);
-      }
+      await login(email, password);
     } catch (err: any) {
       // Traducir errores de Firebase
       const errorMessages: Record<string, string> = {
         'auth/user-not-found': 'Usuario no encontrado',
         'auth/wrong-password': 'Contraseña incorrecta',
-        'auth/email-already-in-use': 'Este correo ya está registrado',
-        'auth/weak-password': 'La contraseña es muy débil',
         'auth/invalid-email': 'Correo electrónico inválido',
         'auth/invalid-credential': 'Credenciales inválidas',
       };
@@ -191,32 +177,6 @@ export const LoginPage: React.FC = () => {
           </>
         ) : (
           <>
-            {/* Tabs Login/Register */}
-            <div className="flex mb-6 bg-white/5 rounded-lg p-1">
-              <button
-                type="button"
-                onClick={() => setIsLogin(true)}
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
-                  isLogin
-                    ? 'bg-white/20 text-white shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Iniciar Sesión
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsLogin(false)}
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
-                  !isLogin
-                    ? 'bg-white/20 text-white shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Registrarse
-              </button>
-            </div>
-
             {/* Error Message */}
             {(error || authError) && (
               <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-200 text-sm">
@@ -254,33 +214,14 @@ export const LoginPage: React.FC = () => {
                   placeholder="••••••••"
                   disabled={isSubmitting}
                 />
-                {isLogin && (
-                  <button
-                    type="button"
-                    onClick={() => { setShowResetPassword(true); setResetEmail(email); setError(null); }}
-                    className="mt-2 text-sm text-blue-400 hover:text-blue-300 transition-all"
-                  >
-                    ¿Olvidaste tu contraseña?
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => { setShowResetPassword(true); setResetEmail(email); setError(null); }}
+                  className="mt-2 text-sm text-blue-400 hover:text-blue-300 transition-all"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
               </div>
-
-              {!isLogin && (
-                <div>
-                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-300 mb-1">
-                    Confirmar Contraseña
-                  </label>
-                  <input
-                    id="confirmPassword"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                    placeholder="••••••••"
-                    disabled={isSubmitting}
-                  />
-                </div>
-              )}
 
               <button
                 type="submit"
@@ -295,25 +236,12 @@ export const LoginPage: React.FC = () => {
                     </svg>
                     Procesando...
                   </span>
-                ) : isLogin ? (
-                  'Iniciar Sesión'
                 ) : (
-                  'Crear Cuenta'
+                  'Iniciar Sesión'
                 )}
               </button>
             </form>
 
-            {/* Footer */}
-            <p className="mt-6 text-center text-slate-500 text-sm">
-              {isLogin ? '¿No tienes cuenta? ' : '¿Ya tienes cuenta? '}
-              <button
-                type="button"
-                onClick={() => setIsLogin(!isLogin)}
-                className="text-blue-400 hover:text-blue-300 font-medium"
-              >
-                {isLogin ? 'Regístrate aquí' : 'Inicia sesión'}
-              </button>
-            </p>
           </>
         )}
       </div>

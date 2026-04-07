@@ -9,8 +9,9 @@ import { DownloadIcon } from './icons/DownloadIcon';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMethodsForEmail } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../../src/firebaseConfig';
-import { employeesService, logsService, permissionsService, cleanDuplicateLogs } from '../../src/services/firestoreService';
+import { employeesService, logsService, permissionsService, cleanDuplicateLogs, tardinessService, motivationalService, toleranceService, type TardinessAdjustment, type MotivationalSettings, type ToleranceSettings } from '../../src/services/firestoreService';
 import { useToast } from '../ui/Toast';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 interface AdminViewProps {
   onExit: () => void;
@@ -160,6 +161,7 @@ const generateTimeOptions = (): string[] => {
 export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const [allLogs, setAllLogs] = useState<LogEntry[]>([]);
   const toast = useToast();
+  const { canEdit, isAdmin, isSupervisor, user, userData } = useAuth();
   const [detailedEmployees, setDetailedEmployees] = useState<DetailedEmployee[]>([]);
   const [permissionRequests, setPermissionRequests] = useState<PermissionRequest[]>([]);
   const timeOptions = useMemo(() => generateTimeOptions(), []);
@@ -219,6 +221,25 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const [endDate, setEndDate] = useState(today);
   const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
 
+  // Estado para gestion de retardos
+  const [tardinessAdjustments, setTardinessAdjustments] = useState<TardinessAdjustment[]>([]);
+  const [editingTardiness, setEditingTardiness] = useState<{key: string; minutes: number; sanction: boolean; reason: string} | null>(null);
+  const [tardinessStartDate, setTardinessStartDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 15);
+    return d.toISOString().slice(0, 10);
+  });
+  const [tardinessEndDate, setTardinessEndDate] = useState(new Date().toISOString().slice(0, 10));
+
+  // Estado para mensajes motivacionales
+  const [motivationalEnabled, setMotivationalEnabled] = useState(true);
+  const [togglingMotivational, setTogglingMotivational] = useState(false);
+
+  // Estado para tolerancia configurable
+  const [toleranceMinutes, setToleranceMinutes] = useState(10);
+  const [editingTolerance, setEditingTolerance] = useState(false);
+  const [tempTolerance, setTempTolerance] = useState(10);
+  const [savingTolerance, setSavingTolerance] = useState(false);
+
   useEffect(() => {
     // Suscribirse a cambios en tiempo real desde Firestore
     const unsubscribeLogs = logsService.subscribe((logs) => {
@@ -233,11 +254,27 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
       setPermissionRequests(requests);
     });
 
+    const unsubscribeTardiness = tardinessService.subscribe((adjustments) => {
+      setTardinessAdjustments(adjustments);
+    });
+
+    const unsubscribeMotivational = motivationalService.subscribe((settings) => {
+      setMotivationalEnabled(settings.enabled);
+    });
+
+    const unsubscribeTolerance = toleranceService.subscribe((settings) => {
+      setToleranceMinutes(settings.minutes);
+      setTempTolerance(settings.minutes);
+    });
+
     // Cleanup: desuscribirse cuando el componente se desmonte
     return () => {
       unsubscribeLogs();
       unsubscribeEmployees();
       unsubscribePermissions();
+      unsubscribeTardiness();
+      unsubscribeMotivational();
+      unsubscribeTolerance();
     };
   }, []);
 
@@ -312,7 +349,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
       const scheduleDate = new Date(logDate);
       scheduleDate.setHours(hours, minutes, 0, 0);
 
-      const toleranceDeadline = new Date(scheduleDate.getTime() + 10 * 60 * 1000);
+      const toleranceDeadline = new Date(scheduleDate.getTime() + toleranceMinutes * 60 * 1000);
       return logDate > toleranceDeadline ? 'Retardo' : '';
     };
 
@@ -845,6 +882,43 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   };
 
   // Funciones para edición de logs de asistencia
+  // Flujo de aprobacion de permisos (2 pasos: supervisor → admin)
+  const handlePermissionDecision = async (
+    requestId: string,
+    decision: 'aprobado' | 'denegado'
+  ) => {
+    const userEmail = user?.email || '';
+    const userName = userData?.displayName || userData?.email || '';
+
+    try {
+      if (isSupervisor) {
+        await permissionsService.supervisorDecision(requestId, decision, userEmail, userName);
+        toast.success(decision === 'aprobado' ? 'Permiso aprobado por supervisor.' : 'Permiso denegado por supervisor.');
+      } else if (isAdmin) {
+        // Admin puede aprobar en cualquier paso
+        const req = permissionRequests.find(r => r.id === requestId);
+        const supervisorDone = req?.supervisorApproval?.status === 'aprobado';
+
+        if (!supervisorDone) {
+          // Si supervisor no ha aprobado, admin actua como supervisor primero
+          await permissionsService.supervisorDecision(requestId, decision, userEmail, userName);
+          if (decision === 'aprobado') {
+            toast.success('Aprobado como supervisor. Falta aprobacion de admin.');
+          } else {
+            toast.success('Permiso denegado.');
+          }
+        } else {
+          // Supervisor ya aprobo, admin da aprobacion final
+          await permissionsService.adminDecision(requestId, decision, userEmail, userName);
+          toast.success(decision === 'aprobado' ? 'Permiso aprobado definitivamente.' : 'Permiso denegado por admin.');
+        }
+      }
+    } catch (error) {
+      console.error('Error al procesar decision:', error);
+      toast.error('Error al procesar la decision.');
+    }
+  };
+
   const handleEditLog = (log: LogEntry) => {
     setEditingLog({ ...log });
     // Convertir timestamp a fecha y hora
@@ -972,6 +1046,176 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     </svg>
   );
 
+  // ========== RETARDOS: calcular desde allLogs con filtro propio ==========
+  const tardinessFilteredLogs = useMemo(() => {
+    const start = new Date(tardinessStartDate + 'T00:00:00').getTime();
+    const end = new Date(tardinessEndDate + 'T23:59:59').getTime();
+    return allLogs.filter(log => log.timestamp >= start && log.timestamp <= end);
+  }, [allLogs, tardinessStartDate, tardinessEndDate]);
+
+  const tardinessData = useMemo(() => {
+    const result: { employeeName: string; date: string; minutesLate: number; scheduleTime: string; checkInTime: string }[] = [];
+    const grouped: { [key: string]: LogEntry[] } = {};
+
+    tardinessFilteredLogs.forEach(log => {
+      const date = new Date(log.timestamp).toISOString().slice(0, 10);
+      const key = `${log.employeeName}__${date}`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(log);
+    });
+
+    for (const key in grouped) {
+      const [employeeName, date] = key.split('__');
+      const dailyLogs = grouped[key].sort((a, b) => a.timestamp - b.timestamp);
+      const checkIn = dailyLogs.find(l => l.type === LogType.ENTRADA);
+
+      if (checkIn) {
+        const scheduleTime = getEffectiveScheduleTime(employeeName, checkIn.timestamp);
+        if (scheduleTime) {
+          const checkInDate = new Date(checkIn.timestamp);
+          const [h, m] = scheduleTime.split(':').map(Number);
+          const schedDate = new Date(checkInDate);
+          schedDate.setHours(h, m, 0, 0);
+          const tolerance = new Date(schedDate.getTime() + toleranceMinutes * 60 * 1000);
+
+          if (checkInDate > tolerance) {
+            const minutesLate = Math.round((checkInDate.getTime() - schedDate.getTime()) / 60000);
+            result.push({
+              employeeName,
+              date,
+              minutesLate,
+              scheduleTime,
+              checkInTime: checkInDate.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+            });
+          }
+        }
+      }
+    }
+
+    return result.sort((a, b) => b.date.localeCompare(a.date));
+  }, [tardinessFilteredLogs, getEffectiveScheduleTime]);
+
+  // Retardos en ultimos 15 dias (para decidir si mostrar mensaje motivacional)
+  const hasRecentTardiness = useMemo(() => {
+    const fifteenDaysAgo = new Date();
+    fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+    const cutoff = fifteenDaysAgo.toISOString().slice(0, 10);
+    // Buscar en allLogs, no en los filtrados
+    const recentLogs = allLogs.filter(log => {
+      const logDate = new Date(log.timestamp).toISOString().slice(0, 10);
+      return logDate >= cutoff && log.type === LogType.ENTRADA;
+    });
+    for (const log of recentLogs) {
+      const scheduleTime = getEffectiveScheduleTime(log.employeeName, log.timestamp);
+      if (scheduleTime) {
+        const checkInDate = new Date(log.timestamp);
+        const [h, m] = scheduleTime.split(':').map(Number);
+        const schedDate = new Date(checkInDate);
+        schedDate.setHours(h, m, 0, 0);
+        const tolerance = new Date(schedDate.getTime() + toleranceMinutes * 60 * 1000);
+        if (checkInDate > tolerance) return true;
+      }
+    }
+    return false;
+  }, [allLogs, getEffectiveScheduleTime]);
+
+  // Obtener ajuste existente para un retardo
+  const getAdjustment = useCallback((employeeName: string, date: string) => {
+    const key = `${employeeName}__${date}`.replace(/\s+/g, '_');
+    return tardinessAdjustments.find(a => a.id === key);
+  }, [tardinessAdjustments]);
+
+  // Guardar ajuste de retardo
+  const handleSaveTardinessAdjustment = async (employeeName: string, date: string, originalMinutes: number) => {
+    if (!editingTardiness) return;
+    try {
+      await tardinessService.upsert(employeeName, date, {
+        employeeName,
+        date,
+        originalMinutesLate: originalMinutes,
+        adjustedMinutesLate: editingTardiness.minutes,
+        hasSanction: editingTardiness.sanction,
+        reason: editingTardiness.reason,
+        adjustedBy: user?.email || 'admin',
+      });
+      toast.success('Ajuste de retardo guardado.');
+      setEditingTardiness(null);
+    } catch {
+      toast.error('Error al guardar ajuste.');
+    }
+  };
+
+  // Guardar tolerancia
+  const handleSaveTolerance = async () => {
+    if (tempTolerance < 0 || tempTolerance > 60) {
+      toast.warning('La tolerancia debe ser entre 0 y 60 minutos.');
+      return;
+    }
+    setSavingTolerance(true);
+    try {
+      await toleranceService.setMinutes(tempTolerance, user?.email || 'admin');
+      toast.success(`Tolerancia actualizada a ${tempTolerance} minutos.`);
+      setEditingTolerance(false);
+    } catch {
+      toast.error('Error al guardar tolerancia.');
+    } finally {
+      setSavingTolerance(false);
+    }
+  };
+
+  // Toggle mensajes motivacionales
+  const handleToggleMotivational = async () => {
+    setTogglingMotivational(true);
+    try {
+      await motivationalService.setEnabled(!motivationalEnabled, user?.email || 'admin');
+      toast.success(motivationalEnabled ? 'Mensajes motivacionales desactivados.' : 'Mensajes motivacionales activados.');
+    } catch {
+      toast.error('Error al cambiar configuracion.');
+    } finally {
+      setTogglingMotivational(false);
+    }
+  };
+
+  // Generar mensaje motivacional del dia (basado en fecha para que sea diferente cada dia)
+  const dailyMotivationalMessage = useMemo(() => {
+    const messages = [
+      { title: 'La puntualidad es respeto', body: 'Llegar a tiempo demuestra respeto por tu equipo y por tu propio trabajo. Cada minuto cuenta para construir un ambiente profesional.' },
+      { title: 'El exito comienza temprano', body: 'Las personas exitosas tienen algo en comun: valoran el tiempo. Ser puntual te da ventaja para organizar tu dia y ser mas productivo.' },
+      { title: 'Tu compromiso se nota', body: 'Cuando llegas puntual, envias un mensaje claro: eres confiable, responsable y comprometido con la empresa. Tu equipo lo aprecia.' },
+      { title: 'Cada minuto importa', body: 'Un minuto de retraso puede parecer poco, pero multiplicado por el equipo y los dias, representa horas perdidas. Se parte de la solucion.' },
+      { title: 'La disciplina abre puertas', body: 'La puntualidad es una forma de disciplina que habla de tu caracter. Los lideres se forman con habitos consistentes dia a dia.' },
+      { title: 'Respeta tu tiempo y el de los demas', body: 'Tu tiempo es valioso, y el de tus companeros tambien. Llegar a tiempo es la forma mas simple de mostrar profesionalismo.' },
+      { title: 'Comienza el dia con el pie derecho', body: 'Llegar temprano te permite prepararte, tomar un cafe tranquilo y empezar el dia sin estres. Es un regalo que te das a ti mismo.' },
+      { title: 'La confianza se construye con constancia', body: 'Cada dia que llegas a tiempo estas construyendo tu reputacion. La confianza se gana con acciones repetidas, no con palabras.' },
+      { title: 'Se el ejemplo que inspira', body: 'Tu puntualidad puede motivar a otros. Se el companero que llega primero y marca la pauta para todo el equipo.' },
+      { title: 'El tiempo no espera a nadie', body: 'No podemos recuperar el tiempo perdido, pero si podemos decidir aprovecharlo mejor desde hoy. Llega temprano, haz la diferencia.' },
+      { title: 'Puntualidad = Profesionalismo', body: 'En el mundo laboral, la puntualidad es tu carta de presentacion. Dice mas de ti que cualquier curriculum.' },
+      { title: 'Hoy es un buen dia para ser puntual', body: 'No importa como fue ayer. Hoy tienes una nueva oportunidad para demostrar tu compromiso. Aprovechala al maximo.' },
+      { title: 'Un equipo puntual es un equipo fuerte', body: 'Cuando todos llegamos a tiempo, el trabajo fluye mejor. Se parte de un equipo que se respeta mutuamente.' },
+      { title: 'Planifica tu manana desde la noche', body: 'Preparar tu ropa, llaves y ruta la noche anterior te ahorra estres en la manana. Pequenos habitos, grandes resultados.' },
+      { title: 'La puntualidad refleja tus valores', body: 'Mas alla de una regla, ser puntual es un valor personal. Demuestra integridad, responsabilidad y respeto por los compromisos.' },
+      { title: 'Llega antes, logra mas', body: 'Los primeros minutos del dia son los mas productivos. Aprovecha esa energia llegando a tiempo y organizando tus prioridades.' },
+      { title: 'Tu actitud marca la diferencia', body: 'Llegar con buena actitud y a tiempo transforma tu dia laboral. El positivismo y la puntualidad van de la mano.' },
+      { title: 'Construye tu legado dia a dia', body: 'Las grandes carreras se construyen con pequenas acciones diarias. La puntualidad es el cimiento de tu crecimiento profesional.' },
+      { title: 'El mejor momento es ahora', body: 'No esperes a manana para mejorar tu puntualidad. Hoy es el dia perfecto para empezar un nuevo habito que transforme tu carrera.' },
+      { title: 'Juntos somos mas fuertes', body: 'Cuando cada miembro del equipo respeta los horarios, la productividad se multiplica. Tu puntualidad fortalece a todo el equipo.' },
+      { title: 'Transforma tu rutina matutina', body: 'Levantarse 15 minutos antes puede cambiar tu dia. Menos prisa, menos estres, mas control. Intentalo esta semana.' },
+      { title: 'La constancia vence al talento', body: 'Un profesional constante y puntual siempre supera a uno talentoso pero impredecible. Se constante, se confiable.' },
+      { title: 'Tu futuro se decide hoy', body: 'Cada decision de llegar a tiempo es una inversion en tu futuro profesional. Las oportunidades llegan a quienes estan presentes.' },
+      { title: 'Celebra tus logros de puntualidad', body: 'Si llevas una buena racha de puntualidad, felicitate. Reconocer tus logros te motiva a mantener el buen habito.' },
+      { title: 'La excelencia es un habito', body: 'Como dijo Aristoteles: somos lo que hacemos repetidamente. La excelencia no es un acto, es un habito. Se puntual por habito.' },
+      { title: 'Piensa en tu equipo', body: 'Cuando llegas tarde, alguien mas cubre tu ausencia. Piensa en tus companeros y en el impacto positivo de tu puntualidad.' },
+      { title: 'Pequenos cambios, grandes resultados', body: 'Salir 10 minutos antes de casa, preparar todo la noche anterior, poner dos alarmas. Pequenos ajustes que transforman tu puntualidad.' },
+      { title: 'Se parte del cambio', body: 'Una cultura de puntualidad empieza por cada uno de nosotros. Se el cambio que quieres ver en tu equipo de trabajo.' },
+      { title: 'La puntualidad es libertad', body: 'Llegar a tiempo te libera del estres de las excusas y las disculpas. Vive con tranquilidad, llega con tiempo de sobra.' },
+      { title: 'Haz que cuente cada dia', body: 'Tienes la oportunidad de empezar bien cada manana. Aprovecha ese regalo siendo puntual y dando lo mejor de ti.' },
+      { title: 'Tu reputacion te precede', body: 'Antes de que hables, tu historial de puntualidad ya habla por ti. Construye una reputacion que abra puertas.' },
+    ];
+
+    const today = new Date();
+    const dayOfYear = Math.floor((today.getTime() - new Date(today.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24));
+    return messages[dayOfYear % messages.length];
+  }, []);
 
   return (
     <div className="container mx-auto p-4 sm:p-6 lg:p-8">
@@ -1016,8 +1260,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
           <AdminLogTable
             logs={filteredLogs}
             getEffectiveScheduleTime={getEffectiveScheduleTime}
-            onEditLog={handleEditLog}
-            onDeleteLog={handleDeleteLog}
+            onEditLog={canEdit ? handleEditLog : undefined}
+            onDeleteLog={canEdit ? handleDeleteLog : undefined}
+            toleranceMinutes={toleranceMinutes}
           />
         </div>
 
@@ -1029,7 +1274,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
           </div>
           <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
             <h2 className="text-xl font-bold text-slate-800 mb-4">Reporte de Incidencias</h2>
-            <IncidentsReport logs={filteredLogs} getEffectiveScheduleTime={getEffectiveScheduleTime} />
+            <IncidentsReport logs={filteredLogs} getEffectiveScheduleTime={getEffectiveScheduleTime} toleranceMinutes={toleranceMinutes} />
           </div>
         </div>
 
@@ -1046,11 +1291,26 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                             <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Detalles</th>
                             <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Horas a Reponer</th>
                             <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Motivo</th>
-                            <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Estado</th>
+                            <th className="py-3 px-4 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Supervisor</th>
+                            <th className="py-3 px-4 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Admin</th>
+                            <th className="py-3 px-4 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Estado Final</th>
+                            {(isAdmin || isSupervisor) && (
+                              <th className="py-3 px-4 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Acciones</th>
+                            )}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                        {permissionRequests.length > 0 ? [...permissionRequests].reverse().map(req => (
+                        {permissionRequests.length > 0 ? [...permissionRequests].reverse().map(req => {
+                            const supStatus = req.supervisorApproval?.status || 'pendiente';
+                            const admStatus = req.adminApproval?.status || 'pendiente';
+                            const isFinal = req.status === 'Aprobado' || req.status?.startsWith('Denegado');
+
+                            // Supervisor puede actuar si su paso esta pendiente
+                            const canSupervisorAct = isSupervisor && supStatus === 'pendiente';
+                            // Admin puede actuar si: supervisor pendiente (actua como sup) o supervisor aprobo (da aprobacion final)
+                            const canAdminAct = isAdmin && !isFinal && !(supStatus === 'aprobado' && admStatus === 'aprobado');
+
+                            return (
                             <tr key={req.id} className="hover:bg-slate-100/50">
                                 <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-800">{`${req.firstName} ${req.lastName} ${req.motherLastName}`}</td>
                                 <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700 font-mono">{new Date(req.requestDate + 'T12:00:00').toLocaleDateString('es-MX')}</td>
@@ -1066,17 +1326,83 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                                     )}
                                 </td>
                                 <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{req.reason}</td>
-                                <td className="py-3 px-4 whitespace-nowrap text-sm">
+                                {/* Columna Supervisor */}
+                                <td className="py-3 px-4 whitespace-nowrap text-sm text-center">
+                                    {supStatus === 'aprobado' ? (
+                                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800" title={req.supervisorApproval?.byName ? `Por: ${req.supervisorApproval.byName}` : ''}>
+                                        Aprobado
+                                      </span>
+                                    ) : supStatus === 'denegado' ? (
+                                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800" title={req.supervisorApproval?.byName ? `Por: ${req.supervisorApproval.byName}` : ''}>
+                                        Denegado
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                        Pendiente
+                                      </span>
+                                    )}
+                                </td>
+                                {/* Columna Admin */}
+                                <td className="py-3 px-4 whitespace-nowrap text-sm text-center">
+                                    {supStatus !== 'aprobado' ? (
+                                      <span className="px-2 py-1 text-xs text-slate-400">Esperando supervisor</span>
+                                    ) : admStatus === 'aprobado' ? (
+                                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800" title={req.adminApproval?.byName ? `Por: ${req.adminApproval.byName}` : ''}>
+                                        Aprobado
+                                      </span>
+                                    ) : admStatus === 'denegado' ? (
+                                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800" title={req.adminApproval?.byName ? `Por: ${req.adminApproval.byName}` : ''}>
+                                        Denegado
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                        Pendiente
+                                      </span>
+                                    )}
+                                </td>
+                                {/* Estado Final */}
+                                <td className="py-3 px-4 whitespace-nowrap text-sm text-center">
                                     <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                                        req.status === 'Pendiente' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                                        req.status === 'Aprobado' ? 'bg-green-100 text-green-800' :
+                                        req.status?.startsWith('Denegado') ? 'bg-red-100 text-red-800' :
+                                        req.status === 'Aprobado por Supervisor' ? 'bg-blue-100 text-blue-800' :
+                                        'bg-yellow-100 text-yellow-800'
                                     }`}>
                                         {req.status}
                                     </span>
                                 </td>
+                                {/* Acciones */}
+                                {(isAdmin || isSupervisor) && (
+                                  <td className="py-3 px-4 whitespace-nowrap text-sm text-center">
+                                    {(canSupervisorAct || canAdminAct) ? (
+                                      <div className="flex gap-1 justify-center">
+                                        <button
+                                          onClick={() => handlePermissionDecision(req.id, 'aprobado')}
+                                          className="px-2 py-1 text-xs font-medium rounded bg-green-500 text-white hover:bg-green-600 transition-colors"
+                                          title="Aprobar"
+                                        >
+                                          Aprobar
+                                        </button>
+                                        <button
+                                          onClick={() => handlePermissionDecision(req.id, 'denegado')}
+                                          className="px-2 py-1 text-xs font-medium rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+                                          title="Denegar"
+                                        >
+                                          Denegar
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-slate-400">
+                                        {isFinal ? 'Finalizado' : 'Sin accion'}
+                                      </span>
+                                    )}
+                                  </td>
+                                )}
                             </tr>
-                        )) : (
+                            );
+                        }) : (
                             <tr>
-                                <td colSpan={7} className="text-center py-4 text-sm text-slate-500">No hay solicitudes de permiso registradas.</td>
+                                <td colSpan={isAdmin || isSupervisor ? 10 : 9} className="text-center py-4 text-sm text-slate-500">No hay solicitudes de permiso registradas.</td>
                             </tr>
                         )}
                     </tbody>
@@ -1111,10 +1437,286 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
             </div>
         </div>
 
+        {/* Gestion de Retardos */}
+        <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <h2 className="text-xl font-bold text-slate-800">Gestion de Retardos</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <label className="text-xs text-slate-500">Desde:</label>
+                <input
+                  type="date"
+                  value={tardinessStartDate}
+                  onChange={(e) => setTardinessStartDate(e.target.value)}
+                  className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white/80 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                <label className="text-xs text-slate-500">Hasta:</label>
+                <input
+                  type="date"
+                  value={tardinessEndDate}
+                  onChange={(e) => setTardinessEndDate(e.target.value)}
+                  className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white/80 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                />
+              </div>
+              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                {tardinessData.length} retardo{tardinessData.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
+
+          {/* Configuracion de tolerancia */}
+          {canEdit && (
+            <div className="mb-4 p-3 bg-slate-50/80 rounded-lg border border-slate-200 flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-medium text-slate-700">Tolerancia actual:</span>
+              </div>
+              {!editingTolerance ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">{toleranceMinutes} min</span>
+                  <button
+                    onClick={() => { setEditingTolerance(true); setTempTolerance(toleranceMinutes); }}
+                    className="text-xs text-blue-600 hover:text-blue-800 underline"
+                  >
+                    Modificar
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={60}
+                    value={tempTolerance}
+                    onChange={(e) => setTempTolerance(Number(e.target.value))}
+                    className="w-16 px-2 py-1 text-sm border border-slate-300 rounded bg-white text-center"
+                  />
+                  <span className="text-xs text-slate-500">minutos</span>
+                  <button
+                    onClick={handleSaveTolerance}
+                    disabled={savingTolerance}
+                    className="px-2 py-1 text-xs font-medium rounded bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
+                  >
+                    Guardar
+                  </button>
+                  <button
+                    onClick={() => setEditingTolerance(false)}
+                    className="px-2 py-1 text-xs font-medium rounded bg-slate-300 text-slate-700 hover:bg-slate-400"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
+              <span className="text-xs text-slate-400 ml-auto">Despues de este tiempo se marca como retardo</span>
+            </div>
+          )}
+
+          {/* Mensaje motivacional - solo si hay retardos en ultimos 15 dias */}
+          {hasRecentTardiness && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                  <svg className="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
+                  </svg>
+                  Mensaje Motivacional del Dia
+                </h3>
+                {canEdit && (
+                  <button
+                    onClick={handleToggleMotivational}
+                    disabled={togglingMotivational}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      motivationalEnabled ? 'bg-green-500' : 'bg-slate-300'
+                    }`}
+                    title={motivationalEnabled ? 'Desactivar mensajes' : 'Activar mensajes'}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow ${
+                      motivationalEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                )}
+              </div>
+              {motivationalEnabled ? (
+                <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-lg">
+                  <p className="text-sm font-semibold text-amber-900">{dailyMotivationalMessage.title}</p>
+                  <p className="text-xs text-amber-800 mt-1">{dailyMotivationalMessage.body}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 italic">Mensajes motivacionales desactivados.</p>
+              )}
+            </div>
+          )}
+
+          {/* Tabla de retardos */}
+          <div className="overflow-x-auto max-h-[500px]">
+            <table className="min-w-full bg-white/60 rounded-lg shadow">
+              <thead className="bg-white/80 sticky top-0">
+                <tr>
+                  <th className="py-3 px-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Colaborador</th>
+                  <th className="py-3 px-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Fecha</th>
+                  <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Hora Entrada</th>
+                  <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Horario</th>
+                  <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Min. Retardo</th>
+                  <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Min. Ajustados</th>
+                  <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Sancion</th>
+                  {canEdit && (
+                    <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Acciones</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {tardinessData.length > 0 ? tardinessData.map(td => {
+                  const adj = getAdjustment(td.employeeName, td.date);
+                  const editKey = `${td.employeeName}__${td.date}`;
+                  const isEditing = editingTardiness?.key === editKey;
+                  const effectiveMinutes = adj ? adj.adjustedMinutesLate : td.minutesLate;
+                  const hasSanction = adj ? adj.hasSanction : true;
+
+                  return (
+                    <tr key={editKey} className="hover:bg-slate-100/50">
+                      <td className="py-2 px-3 text-sm text-slate-800 whitespace-nowrap">{td.employeeName}</td>
+                      <td className="py-2 px-3 text-sm text-slate-700 font-mono whitespace-nowrap">
+                        {new Date(td.date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
+                      </td>
+                      <td className="py-2 px-3 text-sm text-center font-mono text-red-700 font-semibold">{td.checkInTime}</td>
+                      <td className="py-2 px-3 text-sm text-center font-mono text-slate-600">{td.scheduleTime}</td>
+                      <td className="py-2 px-3 text-sm text-center">
+                        <span className="font-mono font-bold text-amber-800 bg-amber-100/60 px-2 py-0.5 rounded">
+                          {td.minutesLate} min
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-sm text-center">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            value={editingTardiness.minutes}
+                            onChange={(e) => setEditingTardiness(prev => prev ? {...prev, minutes: parseInt(e.target.value) || 0} : null)}
+                            className="w-20 text-center px-2 py-1 border border-amber-300 rounded text-sm font-mono"
+                          />
+                        ) : (
+                          <span className={`font-mono font-bold px-2 py-0.5 rounded ${
+                            effectiveMinutes !== td.minutesLate ? 'text-blue-800 bg-blue-100/60' : 'text-slate-600'
+                          }`}>
+                            {effectiveMinutes} min
+                            {effectiveMinutes !== td.minutesLate && (
+                              <span className="text-[10px] ml-1 text-blue-500">ajustado</span>
+                            )}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-3 text-sm text-center">
+                        {isEditing ? (
+                          <select
+                            value={editingTardiness.sanction ? 'si' : 'no'}
+                            onChange={(e) => setEditingTardiness(prev => prev ? {...prev, sanction: e.target.value === 'si'} : null)}
+                            className="text-xs px-2 py-1 border border-slate-300 rounded"
+                          >
+                            <option value="si">Si aplica</option>
+                            <option value="no">No aplica</option>
+                          </select>
+                        ) : (
+                          <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                            hasSanction ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
+                          }`}>
+                            {hasSanction ? 'Si aplica' : 'No aplica'}
+                          </span>
+                        )}
+                      </td>
+                      {canEdit && (
+                        <td className="py-2 px-3 text-sm text-center">
+                          {isEditing ? (
+                            <div className="space-y-1">
+                              <input
+                                type="text"
+                                placeholder="Motivo del ajuste..."
+                                value={editingTardiness.reason}
+                                onChange={(e) => setEditingTardiness(prev => prev ? {...prev, reason: e.target.value} : null)}
+                                className="w-full text-xs px-2 py-1 border border-slate-300 rounded"
+                              />
+                              <div className="flex gap-1 justify-center">
+                                <button
+                                  onClick={() => handleSaveTardinessAdjustment(td.employeeName, td.date, td.minutesLate)}
+                                  className="px-2 py-1 text-xs font-medium rounded bg-green-500 text-white hover:bg-green-600"
+                                >
+                                  Guardar
+                                </button>
+                                <button
+                                  onClick={() => setEditingTardiness(null)}
+                                  className="px-2 py-1 text-xs font-medium rounded bg-slate-300 text-slate-700 hover:bg-slate-400"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setEditingTardiness({
+                                key: editKey,
+                                minutes: effectiveMinutes,
+                                sanction: hasSanction,
+                                reason: adj?.reason || '',
+                              })}
+                              className="px-2 py-1 text-xs font-medium rounded bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
+                              title="Ajustar retardo"
+                            >
+                              Ajustar
+                            </button>
+                          )}
+                          {adj?.reason && !isEditing && (
+                            <p className="text-[10px] text-slate-500 mt-1 max-w-[150px] truncate" title={adj.reason}>
+                              {adj.reason}
+                            </p>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                }) : (
+                  <tr>
+                    <td colSpan={canEdit ? 8 : 7} className="text-center py-6 text-sm text-slate-500">
+                      No hay retardos en el periodo seleccionado.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Resumen de retardos por colaborador */}
+          {tardinessData.length > 0 && (
+            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {Object.entries(
+                tardinessData.reduce((acc, td) => {
+                  const adj = getAdjustment(td.employeeName, td.date);
+                  const hasSanction = adj ? adj.hasSanction : true;
+                  if (!acc[td.employeeName]) acc[td.employeeName] = { total: 0, withSanction: 0 };
+                  acc[td.employeeName].total++;
+                  if (hasSanction) acc[td.employeeName].withSanction++;
+                  return acc;
+                }, {} as Record<string, { total: number; withSanction: number }>)
+              ).map(([name, data]) => (
+                <div key={name} className="p-2 bg-slate-50/80 rounded-lg border border-slate-200 text-center">
+                  <p className="text-xs font-medium text-slate-800 truncate" title={name}>{name.split(' ').slice(0, 2).join(' ')}</p>
+                  <p className="text-lg font-bold text-amber-700">{data.total}</p>
+                  <p className="text-[10px] text-slate-500">
+                    {data.withSanction} con sancion
+                    {data.total - data.withSanction > 0 && `, ${data.total - data.withSanction} sin`}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Alta de Nuevo Colaborador */}
         <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
-          <button 
-            onClick={() => setIsEmployeeSectionVisible(!isEmployeeSectionVisible)} 
+          <button
+            onClick={() => setIsEmployeeSectionVisible(!isEmployeeSectionVisible)}
             className="w-full flex justify-between items-center text-left"
           >
             <h2 className="text-xl font-bold text-slate-800">Alta y Gestión de Colaboradores</h2>
@@ -1123,6 +1725,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
           
           {isEmployeeSectionVisible && (
             <div className="mt-6 border-t pt-6 border-slate-300/50">
+              {canEdit ? (
+              <>
               <h3 className="text-lg font-semibold text-slate-800 mb-4">Alta de Nuevo Colaborador</h3>
               <form onSubmit={handleRegisterEmployee} className="space-y-4">
                 {/* Email para acceso al sistema */}
@@ -1269,6 +1873,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                   </button>
                 </div>
               </form>
+              </>
+              ) : (
+                <p className="text-sm text-slate-500 italic mb-4">Modo supervisor: solo lectura.</p>
+              )}
 
               <div className="mt-8">
                 <div className="flex justify-between items-center mb-4">
@@ -1286,7 +1894,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                     <table className="min-w-full bg-white/60 rounded-lg shadow">
                         <thead className="bg-white/80">
                             <tr>
-                                <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Acciones</th>
+                                {canEdit && <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Acciones</th>}
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Código</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Email</th>
                                 <th className="py-3 px-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Nombre Completo</th>
@@ -1302,7 +1910,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                         <tbody className="divide-y divide-slate-200">
                             {detailedEmployees.length > 0 ? detailedEmployees.map(emp => (
                                 <tr key={emp.id} className="hover:bg-slate-100/50">
-                                    <td className="py-3 px-4 whitespace-nowrap text-sm">
+                                    {canEdit && <td className="py-3 px-4 whitespace-nowrap text-sm">
                                         <div className="flex space-x-2">
                                             <button
                                                 onClick={() => handleEditEmployee(emp)}
@@ -1374,7 +1982,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                                                 </>
                                             )}
                                         </div>
-                                    </td>
+                                    </td>}
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700 font-mono">{emp.codigo}</td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">
                                         {emp.email ? (

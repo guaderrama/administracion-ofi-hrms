@@ -144,6 +144,11 @@ Specialized skills for building features:
 ### Database & Auth
 - **[skills/supabase-auth-memory/SKILL.md](./skills/supabase-auth-memory/SKILL.md)** - Supabase authentication and memory
 
+### UI/UX & Design
+- **[skills/ui-ux-pro-max-skill/](./skills/ui-ux-pro-max-skill/)** - Professional UI/UX design system (25,300+ stars)
+  - 67 UI component styles, 10 dashboard templates, 96 color palettes
+- **[prompts/ui-design-starter.md](./prompts/ui-design-starter.md)** - UI/UX starter prompts
+
 ### Web Development
 - **[skills/nextjs-16-complete-guide/SKILL.md](./skills/nextjs-16-complete-guide/SKILL.md)** - Next.js 16 complete guide
 - **[skills/skill-creator/SKILL.md](./skills/skill-creator/SKILL.md)** - Create custom skills

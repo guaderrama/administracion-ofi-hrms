@@ -269,16 +269,71 @@ export const permissionsService = {
     })) as PermissionRequest[];
   },
 
-  // Crear nueva solicitud
+  // Crear nueva solicitud con flujo de aprobacion
   async create(request: Omit<PermissionRequest, 'id'>): Promise<PermissionRequest> {
     try {
       const docRef = await addDoc(collection(db, PERMISSIONS_COLLECTION), {
         ...request,
+        status: 'Pendiente',
+        supervisorApproval: { status: 'pendiente' },
+        adminApproval: { status: 'pendiente' },
         createdAt: Timestamp.now(),
       });
       return { ...request, id: docRef.id } as PermissionRequest;
     } catch (error) {
       console.error('Error al crear permiso:', error);
+      throw error;
+    }
+  },
+
+  // Aprobacion/denegacion por supervisor
+  async supervisorDecision(
+    id: string,
+    decision: 'aprobado' | 'denegado',
+    userEmail: string,
+    userName: string,
+    comment?: string
+  ): Promise<void> {
+    try {
+      const docRef = doc(db, PERMISSIONS_COLLECTION, id);
+      const newStatus = decision === 'denegado' ? 'Denegado por Supervisor' : 'Aprobado por Supervisor';
+      await updateDoc(docRef, {
+        'supervisorApproval.status': decision,
+        'supervisorApproval.by': userEmail,
+        'supervisorApproval.byName': userName,
+        'supervisorApproval.date': new Date().toISOString(),
+        ...(comment && { 'supervisorApproval.comment': comment }),
+        status: newStatus,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (error) {
+      console.error('Error en decision de supervisor:', error);
+      throw error;
+    }
+  },
+
+  // Aprobacion/denegacion por administrador (solo si supervisor ya aprobo)
+  async adminDecision(
+    id: string,
+    decision: 'aprobado' | 'denegado',
+    userEmail: string,
+    userName: string,
+    comment?: string
+  ): Promise<void> {
+    try {
+      const docRef = doc(db, PERMISSIONS_COLLECTION, id);
+      const newStatus = decision === 'denegado' ? 'Denegado por Admin' : 'Aprobado';
+      await updateDoc(docRef, {
+        'adminApproval.status': decision,
+        'adminApproval.by': userEmail,
+        'adminApproval.byName': userName,
+        'adminApproval.date': new Date().toISOString(),
+        ...(comment && { 'adminApproval.comment': comment }),
+        status: newStatus,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (error) {
+      console.error('Error en decision de admin:', error);
       throw error;
     }
   },
@@ -561,6 +616,302 @@ export const menuConfigService = {
       opt.id === optionId ? { ...opt, enabled } : opt
     );
     await this.update({ ...config, options: updatedOptions });
+  },
+};
+
+// ============================================
+// USUARIOS DEL SISTEMA (users)
+// ============================================
+
+const USERS_COLLECTION = 'users';
+
+export interface SystemUser {
+  uid: string;
+  email: string;
+  role: 'admin' | 'supervisor' | 'employee';
+  displayName?: string;
+  createdAt: Date;
+}
+
+export const usersService = {
+  // Obtener todos los usuarios
+  async getAll(): Promise<SystemUser[]> {
+    const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
+    return querySnapshot.docs.map(docSnap => ({
+      ...docSnap.data(),
+      uid: docSnap.id,
+    })) as SystemUser[];
+  },
+
+  // Actualizar rol de usuario
+  async updateRole(uid: string, role: 'admin' | 'supervisor' | 'employee'): Promise<void> {
+    try {
+      const docRef = doc(db, USERS_COLLECTION, uid);
+      await updateDoc(docRef, { role });
+    } catch (error) {
+      console.error('Error al actualizar rol:', error);
+      throw error;
+    }
+  },
+
+  // Crear documento de usuario en Firestore
+  async create(uid: string, data: Omit<SystemUser, 'uid'>): Promise<void> {
+    try {
+      await setDoc(doc(db, USERS_COLLECTION, uid), {
+        uid,
+        ...data,
+      });
+    } catch (error) {
+      console.error('Error al crear usuario:', error);
+      throw error;
+    }
+  },
+
+  // Eliminar usuario de Firestore
+  async delete(uid: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, USERS_COLLECTION, uid));
+    } catch (error) {
+      console.error('Error al eliminar usuario:', error);
+      throw error;
+    }
+  },
+
+  // Suscribirse a cambios en tiempo real
+  subscribe(callback: (users: SystemUser[]) => void): () => void {
+    const unsubscribe = onSnapshot(
+      collection(db, USERS_COLLECTION),
+      (snapshot) => {
+        const users = snapshot.docs.map(docSnap => ({
+          ...docSnap.data(),
+          uid: docSnap.id,
+        })) as SystemUser[];
+        callback(users);
+      },
+      (error) => {
+        console.error('Error en suscripción de usuarios:', error);
+      }
+    );
+    return unsubscribe;
+  },
+};
+
+// ============================================
+// AJUSTES DE RETARDOS (tardiness_adjustments)
+// ============================================
+
+const TARDINESS_COLLECTION = 'tardiness_adjustments';
+
+export interface TardinessAdjustment {
+  id?: string;
+  employeeName: string;
+  date: string; // YYYY-MM-DD
+  originalMinutesLate: number;
+  adjustedMinutesLate: number;
+  hasSanction: boolean;
+  reason: string;
+  adjustedBy: string;
+  adjustedAt?: Date;
+}
+
+export const tardinessService = {
+  async upsert(employeeName: string, date: string, data: Omit<TardinessAdjustment, 'id'>): Promise<void> {
+    const docId = `${employeeName}__${date}`.replace(/\s+/g, '_');
+    await setDoc(doc(db, TARDINESS_COLLECTION, docId), {
+      ...data,
+      adjustedAt: Timestamp.now(),
+    });
+  },
+
+  subscribe(callback: (adjustments: TardinessAdjustment[]) => void): () => void {
+    return onSnapshot(collection(db, TARDINESS_COLLECTION), (snapshot) => {
+      const data = snapshot.docs.map(d => ({ ...d.data(), id: d.id })) as TardinessAdjustment[];
+      callback(data);
+    });
+  },
+};
+
+// ============================================
+// CONFIGURACION MENSAJES MOTIVACIONALES (app_settings)
+// ============================================
+
+const SETTINGS_COLLECTION = 'app_settings';
+const MOTIVATIONAL_DOC = 'motivational_messages';
+
+export interface MotivationalSettings {
+  enabled: boolean;
+  updatedBy?: string;
+  updatedAt?: Date;
+}
+
+export const motivationalService = {
+  async get(): Promise<MotivationalSettings> {
+    const docSnap = await getDoc(doc(db, SETTINGS_COLLECTION, MOTIVATIONAL_DOC));
+    if (docSnap.exists()) return docSnap.data() as MotivationalSettings;
+    return { enabled: true };
+  },
+
+  async setEnabled(enabled: boolean, updatedBy: string): Promise<void> {
+    await setDoc(doc(db, SETTINGS_COLLECTION, MOTIVATIONAL_DOC), {
+      enabled,
+      updatedBy,
+      updatedAt: Timestamp.now(),
+    });
+  },
+
+  subscribe(callback: (settings: MotivationalSettings) => void): () => void {
+    return onSnapshot(doc(db, SETTINGS_COLLECTION, MOTIVATIONAL_DOC), (docSnap) => {
+      if (docSnap.exists()) {
+        callback(docSnap.data() as MotivationalSettings);
+      } else {
+        callback({ enabled: true });
+      }
+    });
+  },
+};
+
+// ============================================
+// TOLERANCIA DE RETARDOS (app_settings)
+// ============================================
+
+const TOLERANCE_DOC = 'tardiness_tolerance';
+
+export interface ToleranceSettings {
+  minutes: number; // minutos de tolerancia (default 10)
+  updatedBy?: string;
+  updatedAt?: Date;
+}
+
+export const toleranceService = {
+  async get(): Promise<ToleranceSettings> {
+    const docSnap = await getDoc(doc(db, SETTINGS_COLLECTION, TOLERANCE_DOC));
+    if (docSnap.exists()) return docSnap.data() as ToleranceSettings;
+    return { minutes: 10 };
+  },
+
+  async setMinutes(minutes: number, updatedBy: string): Promise<void> {
+    await setDoc(doc(db, SETTINGS_COLLECTION, TOLERANCE_DOC), {
+      minutes,
+      updatedBy,
+      updatedAt: Timestamp.now(),
+    });
+  },
+
+  subscribe(callback: (settings: ToleranceSettings) => void): () => void {
+    return onSnapshot(doc(db, SETTINGS_COLLECTION, TOLERANCE_DOC), (docSnap) => {
+      if (docSnap.exists()) {
+        callback(docSnap.data() as ToleranceSettings);
+      } else {
+        callback({ minutes: 10 });
+      }
+    });
+  },
+};
+
+// ============================================
+// CORTES DE NOMINA (payroll_cuts)
+// ============================================
+
+const PAYROLL_CUTS_COLLECTION = 'payroll_cuts';
+
+export interface PayrollCutEmployee {
+  codigo: string;
+  nombre: string;
+  fechaIngreso: string;
+  diasVacaciones: number;
+  aplicaVacaciones: boolean;
+  diasTrabajados: number;
+  diasPeriodo: number;
+  bonoPuntualidad: number;
+  bonoObjetivos: number;
+  apoyoGasolina: number;
+  total: number;
+}
+
+export interface PayrollCut {
+  id?: string;
+  startDate: string;
+  endDate: string;
+  quincena: number;
+  periodLabel: string;
+  employees: PayrollCutEmployee[];
+  totals: { bonoPuntualidad: number; bonoObjetivos: number; apoyoGasolina: number; total: number };
+  createdBy: string;
+  createdAt: Date;
+}
+
+export const payrollCutsService = {
+  async create(data: Omit<PayrollCut, 'id'>): Promise<string> {
+    const docRef = await addDoc(collection(db, PAYROLL_CUTS_COLLECTION), {
+      ...data,
+      createdAt: Timestamp.now(),
+    });
+    return docRef.id;
+  },
+
+  async remove(id: string): Promise<void> {
+    await deleteDoc(doc(db, PAYROLL_CUTS_COLLECTION, id));
+  },
+
+  subscribe(callback: (cuts: PayrollCut[]) => void): () => void {
+    return onSnapshot(collection(db, PAYROLL_CUTS_COLLECTION), (snapshot) => {
+      const data = snapshot.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+        createdAt: d.data().createdAt?.toDate?.() || new Date(),
+      })) as PayrollCut[];
+      data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(data);
+    });
+  },
+};
+
+// ============================================
+// ANUNCIOS (announcements)
+// ============================================
+
+const ANNOUNCEMENTS_COLLECTION = 'announcements';
+
+export interface Announcement {
+  id?: string;
+  title: string;
+  body: string;
+  priority: 'normal' | 'important' | 'urgent';
+  createdBy: string; // email
+  createdByName: string;
+  createdAt: Date;
+  expiresAt?: string; // YYYY-MM-DD, opcional
+  active: boolean;
+}
+
+export const announcementsService = {
+  async create(data: Omit<Announcement, 'id'>): Promise<string> {
+    const docRef = await addDoc(collection(db, ANNOUNCEMENTS_COLLECTION), {
+      ...data,
+      createdAt: Timestamp.now(),
+    });
+    return docRef.id;
+  },
+
+  async update(id: string, data: Partial<Announcement>): Promise<void> {
+    await updateDoc(doc(db, ANNOUNCEMENTS_COLLECTION, id), data);
+  },
+
+  async remove(id: string): Promise<void> {
+    await deleteDoc(doc(db, ANNOUNCEMENTS_COLLECTION, id));
+  },
+
+  subscribe(callback: (announcements: Announcement[]) => void): () => void {
+    return onSnapshot(collection(db, ANNOUNCEMENTS_COLLECTION), (snapshot) => {
+      const data = snapshot.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+        createdAt: d.data().createdAt?.toDate?.() || new Date(),
+      })) as Announcement[];
+      // Ordenar por fecha, mas recientes primero
+      data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(data);
+    });
   },
 };
 

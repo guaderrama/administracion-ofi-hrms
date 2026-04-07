@@ -51,6 +51,12 @@ const CurrencyIcon: React.FC<{className?: string}> = ({ className }) => (
     </svg>
 );
 
+const UsersIcon: React.FC<{className?: string}> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+    </svg>
+);
+
 
 interface SidebarProps {
   setView: (view: string) => void;
@@ -67,7 +73,7 @@ const CloseIcon: React.FC<{className?: string}> = ({ className }) => (
 
 export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen = true, onClose }) => {
   const [openSection, setOpenSection] = useState<string>('checador');
-  const { isAdmin, userData, logout } = useAuth();
+  const { isAdmin, canViewAll, canEdit, userData, logout } = useAuth();
   const [menuConfig, setMenuConfig] = useState<MenuConfig | null>(null);
 
   // Cargar configuración del menú desde Firestore
@@ -87,10 +93,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
     }
   };
 
-  // Filtrar opciones según rol: admin ve todo, empleados solo las habilitadas
+  // Filtrar opciones según rol: admin/supervisor ve todo, empleados solo las habilitadas
   const getVisibleOptions = (): MenuOptionConfig[] => {
     if (!menuConfig) return [];
-    if (isAdmin) return menuConfig.options;
+    if (canViewAll) return menuConfig.options;
     return menuConfig.options.filter(opt => opt.enabled);
   };
 
@@ -186,9 +192,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
       <div className="px-4 py-3 border-b border-amber-900/50">
         <p className="text-amber-100 text-sm truncate">{userData?.email}</p>
         <span className={`inline-block mt-1 px-2 py-0.5 text-xs rounded-full ${
-          isAdmin ? 'bg-amber-600 text-white' : 'bg-amber-900/50 text-amber-200'
+          isAdmin ? 'bg-amber-600 text-white'
+            : userData?.role === 'supervisor' ? 'bg-purple-600 text-white'
+            : 'bg-amber-900/50 text-amber-200'
         }`}>
-          {isAdmin ? 'Administrador' : 'Empleado'}
+          {isAdmin ? 'Administrador' : userData?.role === 'supervisor' ? 'Supervisor' : 'Empleado'}
         </span>
       </div>
 
@@ -223,16 +231,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
                   className={`flex-1 group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-150 ${
                     currentView === option.view
                       ? 'bg-amber-800 text-white'
-                      : option.enabled || isAdmin
+                      : option.enabled || canViewAll
                         ? 'text-amber-100 hover:bg-amber-900/50 hover:text-white'
                         : 'text-amber-100/50'
-                  } ${!option.enabled && isAdmin ? 'opacity-50' : ''}`}
+                  } ${!option.enabled && canViewAll ? 'opacity-50' : ''}`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full mr-3 ${option.enabled ? 'bg-current' : 'bg-red-400'}`}></span>
                   <span>{option.label}</span>
                 </a>
-                {/* Toggle solo visible para admin */}
-                {isAdmin && (
+                {/* Toggle solo visible para admin (no supervisor) */}
+                {canEdit && (
                   <button
                     onClick={(e) => { e.stopPropagation(); handleToggleOption(option.id, option.enabled); }}
                     className={`ml-2 px-2 py-1 rounded text-xs font-bold transition-all shadow-sm ${
@@ -247,15 +255,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
                 )}
               </li>
             ))}
-            {getVisibleOptions().length === 0 && !isAdmin && (
+            {getVisibleOptions().length === 0 && !canViewAll && (
               <li className="mt-1 px-3 py-2 text-sm text-amber-100/50 italic">
                 No hay opciones disponibles
               </li>
             )}
           </Section>
 
-          {/* Solo mostrar Requisiciones para Admin */}
-          {isAdmin && (
+          {/* Mostrar Requisiciones para Admin y Supervisor */}
+          {canViewAll && (
             <Section sectionKey="requisitions" title="Requisiciones" icon={<DocumentTextIcon />}>
                 <li className="mt-1">
                   <a
@@ -276,8 +284,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
         </nav>
 
         <div className="px-2 py-4 border-t border-amber-900/50 space-y-2">
-            {/* Solo mostrar Administrador para Admin */}
-            {isAdmin && (
+            {/* Mostrar Administrador para Admin y Supervisor */}
+            {canViewAll && (
               <a
                   href="#"
                   onClick={(e) => { e.preventDefault(); handleNavigation('admin'); }}
@@ -292,8 +300,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
               </a>
             )}
 
-            {/* Solo mostrar Nóminas para Admin */}
-            {isAdmin && (
+            {/* Mostrar Nominas para Admin y Supervisor */}
+            {canViewAll && (
               <a
                   href="#"
                   onClick={(e) => { e.preventDefault(); handleNavigation('nominas'); }}
@@ -304,7 +312,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ setView, currentView, isOpen =
                   }`}
               >
                   <CurrencyIcon className="mr-3" />
-                  Nóminas
+                  Nominas
+              </a>
+            )}
+
+            {/* Solo mostrar Gestión de Usuarios para Admin */}
+            {isAdmin && (
+              <a
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); handleNavigation('user-management'); }}
+                  className={`group flex items-center px-2 py-2 text-base font-medium rounded-md ${
+                  currentView === 'user-management'
+                      ? 'bg-amber-800 text-white'
+                      : 'text-amber-100 hover:bg-amber-900/50 hover:text-white'
+                  }`}
+              >
+                  <UsersIcon className="mr-3" />
+                  Gestion de Usuarios
               </a>
             )}
 

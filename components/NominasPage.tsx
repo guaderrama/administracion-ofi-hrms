@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
-import { employeesService, logsService } from '../src/services/firestoreService';
+import { employeesService, logsService, payrollCutsService, type PayrollCut } from '../src/services/firestoreService';
 import { NominasPdfPreview } from './NominasPdfPreview';
 import {
   PayrollPeriod,
@@ -28,16 +28,24 @@ interface NominasPageProps {
 }
 
 export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, canViewAll, canEdit, user } = useAuth();
   const [employees, setEmployees] = useState<DetailedEmployee[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState<PayrollPeriod>(getCurrentPeriod());
   const [selectedEmployee, setSelectedEmployee] = useState<DetailedEmployee | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingProgress, setGeneratingProgress] = useState({ current: 0, total: 0 });
   const [daysWorked, setDaysWorked] = useState<Record<string, number>>({});
+  const [savedCuts, setSavedCuts] = useState<PayrollCut[]>([]);
+  const [savingCut, setSavingCut] = useState(false);
+  const [showSavedCuts, setShowSavedCuts] = useState(false);
 
   useEffect(() => {
     const unsubscribe = employeesService.subscribe((emps) => setEmployees(emps));
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = payrollCutsService.subscribe((cuts) => setSavedCuts(cuts));
     return () => unsubscribe();
   }, []);
 
@@ -122,8 +130,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     return <AccessDenied icon="🔒" title="Acceso Restringido" message="Debes iniciar sesión para acceder a esta sección." onBack={() => setView('dashboard')} />;
   }
 
-  if (!isAdmin) {
-    return <AccessDenied message="No tienes permisos de administrador para acceder a Nóminas." onBack={() => setView('dashboard')} />;
+  if (!canViewAll) {
+    return <AccessDenied message="No tienes permisos para acceder a Nominas." onBack={() => setView('dashboard')} />;
   }
 
   const generatePdf = async (employee: DetailedEmployee) => {
@@ -185,6 +193,86 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       setSelectedEmployee(null);
       setGeneratingProgress({ current: 0, total: 0 });
     }
+  };
+
+  // Guardar corte de nomina
+  const handleSaveCut = async () => {
+    if (employees.length === 0) return;
+    setSavingCut(true);
+    try {
+      const cutEmployees = employees.map(emp => {
+        const days = daysWorked[emp.id] ?? diasEnPeriodo;
+        const salary = calculateSalary(emp, days, diasEnPeriodo);
+        const vacation = calculateVacation(emp.fechaIngreso);
+        return {
+          codigo: emp.codigo || '',
+          nombre: getEmployeeFullName(emp),
+          fechaIngreso: emp.fechaIngreso,
+          diasVacaciones: vacation.daysEntitled,
+          aplicaVacaciones: vacation.eligible,
+          diasTrabajados: days,
+          diasPeriodo: diasEnPeriodo,
+          bonoPuntualidad: salary.bonoPuntualidad,
+          bonoObjetivos: salary.bonoObjetivos,
+          apoyoGasolina: salary.apoyoGasolina,
+          total: salary.netoAPagar,
+        };
+      });
+      const cutTotals = cutEmployees.reduce(
+        (acc, e) => ({
+          bonoPuntualidad: acc.bonoPuntualidad + e.bonoPuntualidad,
+          bonoObjetivos: acc.bonoObjetivos + e.bonoObjetivos,
+          apoyoGasolina: acc.apoyoGasolina + e.apoyoGasolina,
+          total: acc.total + e.total,
+        }),
+        { bonoPuntualidad: 0, bonoObjetivos: 0, apoyoGasolina: 0, total: 0 }
+      );
+      await payrollCutsService.create({
+        startDate: selectedPeriod.startDate,
+        endDate: selectedPeriod.endDate,
+        quincena: selectedPeriod.quincena,
+        periodLabel: getPeriodLabel(selectedPeriod),
+        employees: cutEmployees,
+        totals: cutTotals,
+        createdBy: user?.email || '',
+        createdAt: new Date(),
+      });
+    } finally {
+      setSavingCut(false);
+    }
+  };
+
+  // Descargar corte como Excel CSV
+  const handleDownloadExcel = (cut: PayrollCut) => {
+    const headers = ['Codigo', 'Nombre Completo', 'Fecha Ingreso', 'Dias Vacaciones', 'Aplica Vacaciones', 'Dias Trabajados', 'Dias Periodo', 'Bono Puntualidad', 'Bono Objetivos', 'Apoyo Gasolina', 'Total'];
+    const rows = cut.employees.map(e => [
+      e.codigo,
+      `"${e.nombre}"`,
+      e.fechaIngreso,
+      e.diasVacaciones,
+      e.aplicaVacaciones ? 'Si' : 'No',
+      e.diasTrabajados,
+      e.diasPeriodo,
+      e.bonoPuntualidad.toFixed(2),
+      e.bonoObjetivos.toFixed(2),
+      e.apoyoGasolina.toFixed(2),
+      e.total.toFixed(2),
+    ]);
+    // Totales
+    rows.push([
+      '', 'TOTALES', '', '', '', '', '',
+      cut.totals.bonoPuntualidad.toFixed(2),
+      cut.totals.bonoObjetivos.toFixed(2),
+      cut.totals.apoyoGasolina.toFixed(2),
+      cut.totals.total.toFixed(2),
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Nomina_${cut.startDate}_${cut.endDate}_Q${cut.quincena}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   const totals = useMemo(() => {
@@ -290,15 +378,17 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             Colaboradores ({employees.length})
             {loadingAttendance && <span className="ml-2 text-sm font-normal text-amber-600">Cargando asistencia...</span>}
           </h2>
-          <button
-            onClick={handleGenerateAll}
-            disabled={isGenerating || employees.length === 0}
-            className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-medium hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-          >
-            {isGenerating && generatingProgress.total > 0
-              ? `Generando ${generatingProgress.current} de ${generatingProgress.total}...`
-              : 'Generar Todos los Recibos'}
-          </button>
+          {canEdit && (
+            <button
+              onClick={handleGenerateAll}
+              disabled={isGenerating || employees.length === 0}
+              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-medium hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {isGenerating && generatingProgress.total > 0
+                ? `Generando ${generatingProgress.current} de ${generatingProgress.total}...`
+                : 'Generar Todos los Recibos'}
+            </button>
+          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -315,7 +405,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Objetivos</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Apoyo Gasolina</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Total</th>
-                <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Acciones</th>
+                {canEdit && <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Acciones</th>}
               </tr>
             </thead>
             <tbody>
@@ -338,32 +428,38 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                       </StatusBadge>
                     </td>
                     <td className="py-3 px-2 text-center">
-                      <input
-                        type="number"
-                        min={0}
-                        max={diasEnPeriodo}
-                        value={days}
-                        onChange={(e) => {
-                          const val = Math.max(0, Math.min(diasEnPeriodo, parseInt(e.target.value) || 0));
-                          setDaysWorked((prev) => ({ ...prev, [emp.id]: val }));
-                        }}
-                        className="w-14 text-center px-1 py-1 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                      />
+                      {canEdit ? (
+                        <input
+                          type="number"
+                          min={0}
+                          max={diasEnPeriodo}
+                          value={days}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(diasEnPeriodo, parseInt(e.target.value) || 0));
+                            setDaysWorked((prev) => ({ ...prev, [emp.id]: val }));
+                          }}
+                          className="w-14 text-center px-1 py-1 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                        />
+                      ) : (
+                        <span className="text-sm font-medium">{days}</span>
+                      )}
                       <span className="text-xs text-slate-400 ml-1">/{diasEnPeriodo}</span>
                     </td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoPuntualidad)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoObjetivos)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.apoyoGasolina)}</td>
                     <td className="py-3 px-2 text-right font-bold text-amber-800">{formatCurrency(salary.netoAPagar)}</td>
-                    <td className="py-3 px-2 text-center">
-                      <button
-                        onClick={() => handleGenerateSingle(emp)}
-                        disabled={isGenerating}
-                        className="px-3 py-1 bg-amber-100 text-amber-800 rounded-md text-xs font-medium hover:bg-amber-200 disabled:opacity-50 transition-colors"
-                      >
-                        Generar Recibo
-                      </button>
-                    </td>
+                    {canEdit && (
+                      <td className="py-3 px-2 text-center">
+                        <button
+                          onClick={() => handleGenerateSingle(emp)}
+                          disabled={isGenerating}
+                          className="px-3 py-1 bg-amber-100 text-amber-800 rounded-md text-xs font-medium hover:bg-amber-200 disabled:opacity-50 transition-colors"
+                        >
+                          Generar Recibo
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -375,7 +471,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoObjetivos)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.apoyoGasolina)}</td>
                 <td className="py-3 px-2 text-right font-bold text-amber-800 text-base">{formatCurrency(totals.total)}</td>
-                <td></td>
+                {canEdit && <td></td>}
               </tr>
             </tfoot>
           </table>
@@ -387,6 +483,102 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           </div>
         )}
       </Card>
+
+      {/* Guardar Corte + Cortes Guardados */}
+      {canEdit && (
+        <Card className="mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800">Cortes de Nomina</h2>
+              <p className="text-xs text-slate-500">Guarda el corte actual para conservar los calculos y descargarlos en Excel.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleSaveCut}
+                disabled={savingCut || employees.length === 0}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-600 to-green-600 text-white rounded-lg text-sm font-medium hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+                {savingCut ? 'Guardando...' : 'Guardar Corte Actual'}
+              </button>
+              <button
+                onClick={() => setShowSavedCuts(!showSavedCuts)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                </svg>
+                Cortes Guardados ({savedCuts.length})
+              </button>
+            </div>
+          </div>
+
+          {showSavedCuts && (
+            <div className="border-t border-slate-200 pt-4">
+              {savedCuts.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-4">No hay cortes guardados.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200">
+                        <th className="text-left py-2 px-3 font-semibold text-slate-600 text-xs">Periodo</th>
+                        <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Quincena</th>
+                        <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Empleados</th>
+                        <th className="text-right py-2 px-3 font-semibold text-slate-600 text-xs">Total Nomina</th>
+                        <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Guardado por</th>
+                        <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Fecha</th>
+                        <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {savedCuts.map(cut => (
+                        <tr key={cut.id} className="border-b border-slate-100 hover:bg-amber-50/50">
+                          <td className="py-2.5 px-3 text-slate-800 font-medium">{cut.periodLabel}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-xs font-semibold">Q{cut.quincena}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center text-slate-600">{cut.employees.length}</td>
+                          <td className="py-2.5 px-3 text-right font-bold text-amber-800">{formatCurrency(cut.totals.total)}</td>
+                          <td className="py-2.5 px-3 text-center text-xs text-slate-500">{cut.createdBy?.split('@')[0]}</td>
+                          <td className="py-2.5 px-3 text-center text-xs text-slate-500">
+                            {new Date(cut.createdAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <div className="flex gap-1 justify-center">
+                              <button
+                                onClick={() => handleDownloadExcel(cut)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 rounded-md text-xs font-medium hover:bg-green-200 transition-colors"
+                                title="Descargar Excel"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                </svg>
+                                Excel
+                              </button>
+                              <button
+                                onClick={() => cut.id && payrollCutsService.remove(cut.id)}
+                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="Eliminar corte"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                </svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* PDF Preview */}
       {selectedEmployee && (

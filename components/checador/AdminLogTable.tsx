@@ -11,9 +11,10 @@ interface AdminLogTableProps {
   getEffectiveScheduleTime: (employeeName: string, timestamp: number) => string;
   onEditLog?: (log: LogEntry) => void;
   onDeleteLog?: (log: LogEntry) => void;
+  toleranceMinutes?: number;
 }
 
-export const AdminLogTable: React.FC<AdminLogTableProps> = ({ logs, getEffectiveScheduleTime, onEditLog, onDeleteLog }) => {
+export const AdminLogTable: React.FC<AdminLogTableProps> = ({ logs, getEffectiveScheduleTime, onEditLog, onDeleteLog, toleranceMinutes = 10 }) => {
   const sortedLogs = [...logs].sort((a, b) => b.timestamp - a.timestamp);
 
   const formatDate = (ts: number) => {
@@ -81,7 +82,7 @@ export const AdminLogTable: React.FC<AdminLogTableProps> = ({ logs, getEffective
     scheduleDate.setHours(hours, minutes, 0, 0);
 
     // 10 minutos de tolerancia (en milisegundos)
-    const toleranceDeadline = new Date(scheduleDate.getTime() + 10 * 60 * 1000);
+    const toleranceDeadline = new Date(scheduleDate.getTime() + toleranceMinutes * 60 * 1000);
 
     if (logDate > toleranceDeadline) {
       return (
