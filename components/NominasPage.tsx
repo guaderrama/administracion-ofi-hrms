@@ -152,6 +152,19 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     return result;
   }, [selectedCommissionIds, commissionReports]);
 
+  // Labels de las comisiones (nombres de los reportes por tipo)
+  const commissionLabels = useMemo((): { caminata?: string; semana?: string } => {
+    const labels: { caminata?: string; semana?: string } = {};
+    selectedCommissionIds.forEach(reportId => {
+      const report = commissionReports.find(r => r.id === reportId);
+      if (!report) return;
+      const isCaminata = (report.name || '').toLowerCase().includes('caminata');
+      if (isCaminata) labels.caminata = report.name;
+      else labels.semana = report.name;
+    });
+    return labels;
+  }, [selectedCommissionIds, commissionReports]);
+
   // Versión simple para compatibilidad (solo totales)
   const employeeCommissions = useMemo((): Record<string, number> => {
     const totals: Record<string, number> = {};
@@ -695,7 +708,10 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Puntualidad</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Objetivos</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Apoyo Gasolina</th>
-                {selectedCommissionIds.size > 0 && <th className="text-right py-3 px-2 font-semibold text-amber-700 text-xs">Comisiones</th>}
+                {selectedCommissionIds.size > 0 && <>
+                  <th className="text-right py-3 px-2 font-semibold text-amber-700 text-xs">Com. Caminata</th>
+                  <th className="text-right py-3 px-2 font-semibold text-green-700 text-xs">Com. Semana</th>
+                </>}
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Total</th>
                 {canEdit && <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Acciones</th>}
               </tr>
@@ -758,11 +774,14 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoPuntualidad)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoObjetivos)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.apoyoGasolina)}</td>
-                    {selectedCommissionIds.size > 0 && (
+                    {selectedCommissionIds.size > 0 && (<>
                       <td className="py-3 px-2 text-right text-sm text-amber-700 font-semibold">
-                        {formatCurrency(employeeCommissions[emp.codigo] || 0)}
+                        {formatCurrency(employeeCommissionBreakdown[emp.codigo]?.caminata || 0)}
                       </td>
-                    )}
+                      <td className="py-3 px-2 text-right text-sm text-green-700 font-semibold">
+                        {formatCurrency(employeeCommissionBreakdown[emp.codigo]?.semana || 0)}
+                      </td>
+                    </>)}
                     <td className="py-3 px-2 text-right font-bold text-amber-800">
                       {formatCurrency(salary.netoAPagar + (employeeCommissions[emp.codigo] || 0))}
                     </td>
@@ -787,11 +806,14 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoPuntualidad)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoObjetivos)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.apoyoGasolina)}</td>
-                {selectedCommissionIds.size > 0 && (
+                {selectedCommissionIds.size > 0 && (<>
                   <td className="py-3 px-2 text-right font-bold text-amber-700">
-                    {formatCurrency(Object.values(employeeCommissions).reduce((a, b) => a + b, 0))}
+                    {formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.caminata, 0))}
                   </td>
-                )}
+                  <td className="py-3 px-2 text-right font-bold text-green-700">
+                    {formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0))}
+                  </td>
+                </>)}
                 <td className="py-3 px-2 text-right font-bold text-amber-800 text-base">
                   {formatCurrency(totals.total + Object.values(employeeCommissions).reduce((a, b) => a + b, 0))}
                 </td>
@@ -959,6 +981,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                     diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
                     comision={employeeCommissions[selectedEmployee.codigo] || 0}
                     comisionDesglose={employeeCommissionBreakdown[selectedEmployee.codigo]}
+                    comisionLabels={commissionLabels}
                   />
               </div>
             </div>
@@ -993,6 +1016,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
             comision={employeeCommissions[selectedEmployee.codigo] || 0}
             comisionDesglose={employeeCommissionBreakdown[selectedEmployee.codigo]}
+            comisionLabels={commissionLabels}
             forPdf
           />
         </div>

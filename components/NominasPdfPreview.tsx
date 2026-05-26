@@ -22,6 +22,7 @@ interface NominasPdfPreviewProps {
   forPdf?: boolean;
   comision?: number;
   comisionDesglose?: CommissionBreakdown;
+  comisionLabels?: { caminata?: string; semana?: string };
 }
 
 const MESES = [
@@ -58,7 +59,8 @@ const ReciboSection: React.FC<{
   copyLabel: string;
   comision: number;
   comisionDesglose?: CommissionBreakdown;
-}> = ({ employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, copyLabel, comision, comisionDesglose }) => (
+  comisionLabels?: { caminata?: string; semana?: string };
+}> = ({ employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, copyLabel, comision, comisionDesglose, comisionLabels }) => (
   <div style={{ height: '127mm', padding: '8mm 12mm', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
     {/* Header */}
     <div style={{ textAlign: 'center', borderBottom: '2px solid #92400e', paddingBottom: '6px', marginBottom: '8px' }}>
@@ -119,19 +121,19 @@ const ReciboSection: React.FC<{
           </tr>
           {comisionDesglose && comisionDesglose.caminata > 0 && (
             <tr style={s.row}>
-              <td style={{ ...s.label, color: '#92400e' }}>Comisión Caminata (Jueves)</td>
+              <td style={{ ...s.label, color: '#92400e' }}>Com. Caminata {comisionLabels?.caminata ? `— ${comisionLabels.caminata}` : ''}</td>
               <td style={{ ...s.value, color: '#92400e' }}>{formatCurrency(comisionDesglose.caminata)}</td>
             </tr>
           )}
           {comisionDesglose && comisionDesglose.semana > 0 && (
             <tr style={s.row}>
-              <td style={{ ...s.label, color: '#92400e' }}>Comisión Semanal (Galería)</td>
+              <td style={{ ...s.label, color: '#92400e' }}>Com. Semanal {comisionLabels?.semana ? `— ${comisionLabels.semana}` : ''}</td>
               <td style={{ ...s.value, color: '#92400e' }}>{formatCurrency(comisionDesglose.semana)}</td>
             </tr>
           )}
           {comisionDesglose && comisionDesglose.originales > 0 && (
             <tr style={s.row}>
-              <td style={{ ...s.label, color: '#92400e' }}>Comisión Obras Originales</td>
+              <td style={{ ...s.label, color: '#92400e' }}>Com. Obras Originales</td>
               <td style={{ ...s.value, color: '#92400e' }}>{formatCurrency(comisionDesglose.originales)}</td>
             </tr>
           )}
@@ -184,11 +186,11 @@ const ReciboSection: React.FC<{
   </div>
 );
 
-export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados, forPdf = false, comision = 0, comisionDesglose }) => {
+export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados, forPdf = false, comision = 0, comisionDesglose, comisionLabels }) => {
   const diasEnPeriodo = getDaysInQuincena(period);
   const salary = calculateSalary(employee, diasTrabajados, diasEnPeriodo);
   const fullName = getEmployeeFullName(employee);
-  const commonProps = { employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, comision, comisionDesglose };
+  const commonProps = { employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, comision, comisionDesglose, comisionLabels };
 
   return (
     <div
