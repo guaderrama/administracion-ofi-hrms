@@ -11,6 +11,7 @@ import { AdminPage } from './components/AdminPage';
 import { NominasPage } from './components/NominasPage';
 import { UserManagementPage } from './components/UserManagementPage';
 import { CalendarPage } from './components/CalendarPage';
+import { ComisionesPage } from './components/ComisionesPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { useAuth } from './src/contexts/AuthContext';
 import { LoadingSpinner } from './components/ui/LoadingSpinner';
@@ -85,6 +86,9 @@ const App: React.FC = () => {
       case 'calendar':
         if (!canViewAll) return <DashboardPage />;
         return <CalendarPage setView={setCurrentView} />;
+      case 'comisiones':
+        if (!canViewAll) return <DashboardPage />;
+        return <ComisionesPage setView={setCurrentView} />;
       default:
         // Vista por defecto si ninguna coincide
         return <DashboardPage />;

@@ -189,6 +189,83 @@ export interface IncomeEntry {
   notes?: string;
 }
 
+// --- Comisiones ---
+
+export type ProductCategory = 'retail' | 'souvenirs' | 'originales';
+export type CommissionType = 'jueves' | 'semana';
+
+export interface SaleRecord {
+  receiptNum: string;
+  date: string; // YYYY-MM-DD
+  dayOfWeek: number; // 0=domingo, 4=jueves
+  customerCode: string;
+  customerName: string;
+  quantity: number;
+  subtotal: number;
+  discount: number;
+  total: number;
+  paid: number;
+  details: string;
+  register: string;
+  user: string; // vendedor
+  status: string;
+  sku: string;
+  paymentMethod: string; // Credit Card MNX, Cash USD, etc.
+  category: ProductCategory;
+  isExcluded: boolean; // true si es venta a colaborador, cortesía o voided
+  excludeReason?: string;
+}
+
+export interface SaleGroup {
+  receiptNum: string;
+  date: string;
+  dayOfWeek: number;
+  customerCode: string;
+  customerName: string;
+  user: string;
+  totalAmount: number;
+  paidAmount: number;
+  paymentMethod: string;
+  status: string;
+  lines: SaleRecord[];
+  isExcluded: boolean;
+  excludeReason?: string;
+}
+
+export interface CommissionSettings {
+  ivaPercent: number; // default 16
+  bankFeePercent: number; // default 4
+  exchangeRate: number; // USD to MXN
+  retailPercentJueves: number; // default 5
+  souvenirsPercentJueves: number; // default 25
+  originalesPercentJueves: number; // editable
+  retailPercentSemana: number; // editable
+  souvenirsPercentSemana: number; // editable
+  originalesPercentSemana: number; // editable
+}
+
+export interface CommissionSummary {
+  type: CommissionType;
+  dateRange: { start: string; end: string };
+  totalSales: number;
+  excludedSales: number;
+  retailTotal: number;
+  souvenirsTotal: number;
+  originalesTotal: number;
+  retailCommission: number;
+  souvenirsCommission: number;
+  originalesCommission: number;
+  totalCommission: number;
+}
+
+export interface EmployeeCommission {
+  employeeCode: string;
+  employeeName: string;
+  present: boolean; // para jueves
+  individualSales: number; // para semana (ventas propias)
+  commission: number;
+}
+
 // --- Attendance Day (resumen validado de asistencia por día) ---
 
 export type AttendanceDayStatus = 'complete' | 'incomplete' | 'no_checkout' | 'incomplete_lunch' | 'anomaly';
