@@ -3,7 +3,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { employeesService, logsService, attendanceDaysService, payrollCutsService, commissionsService, vacationRequestsService, permissionsService, type PayrollCut, type SavedCommissionReport, type VacationRequestRecord } from '../src/services/firestoreService';
 import type { PermissionRequest } from '../types';
 import { Compensation } from '../types';
-import { NominasPdfPreview } from './NominasPdfPreview';
+import { NominasPdfPreview, type CommissionBreakdown } from './NominasPdfPreview';
 import {
   PayrollPeriod,
   getCurrentPeriod,
@@ -132,17 +132,34 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   }, [commissionReports]);
 
   // Comisiones por empleado de los reportes seleccionados
-  const employeeCommissions = useMemo((): Record<string, number> => {
-    const totals: Record<string, number> = {};
+  // Desglose de comisiones por empleado: { code: { total, caminata, semana, originales } }
+  const employeeCommissionBreakdown = useMemo((): Record<string, { total: number; caminata: number; semana: number; originales: number }> => {
+    const result: Record<string, { total: number; caminata: number; semana: number; originales: number }> = {};
     selectedCommissionIds.forEach(reportId => {
       const report = commissionReports.find(r => r.id === reportId);
       if (!report?.employeeCommissions) return;
+      const isCaminata = (report.name || '').toLowerCase().includes('caminata');
       Object.entries(report.employeeCommissions).forEach(([code, amount]) => {
-        totals[code] = (totals[code] || 0) + (amount as number);
+        if (!result[code]) result[code] = { total: 0, caminata: 0, semana: 0, originales: 0 };
+        result[code].total += amount as number;
+        if (isCaminata) {
+          result[code].caminata += amount as number;
+        } else {
+          result[code].semana += amount as number;
+        }
       });
     });
-    return totals;
+    return result;
   }, [selectedCommissionIds, commissionReports]);
+
+  // Versión simple para compatibilidad (solo totales)
+  const employeeCommissions = useMemo((): Record<string, number> => {
+    const totals: Record<string, number> = {};
+    Object.entries(employeeCommissionBreakdown).forEach(([code, bd]) => {
+      totals[code] = bd.total;
+    });
+    return totals;
+  }, [employeeCommissionBreakdown]);
 
   const toggleCommissionReport = (reportId: string) => {
     setSelectedCommissionIds(prev => {
@@ -941,6 +958,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                     period={selectedPeriod}
                     diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
                     comision={employeeCommissions[selectedEmployee.codigo] || 0}
+                    comisionDesglose={employeeCommissionBreakdown[selectedEmployee.codigo]}
                   />
               </div>
             </div>
@@ -974,6 +992,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             period={selectedPeriod}
             diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
             comision={employeeCommissions[selectedEmployee.codigo] || 0}
+            comisionDesglose={employeeCommissionBreakdown[selectedEmployee.codigo]}
             forPdf
           />
         </div>
