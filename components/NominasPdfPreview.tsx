@@ -14,6 +14,7 @@ interface NominasPdfPreviewProps {
   period: PayrollPeriod;
   diasTrabajados: number;
   forPdf?: boolean;
+  comision?: number;
 }
 
 const MESES = [
@@ -48,7 +49,8 @@ const ReciboSection: React.FC<{
   salary: ReturnType<typeof calculateSalary>;
   fullName: string;
   copyLabel: string;
-}> = ({ employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, copyLabel }) => (
+  comision: number;
+}> = ({ employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, copyLabel, comision }) => (
   <div style={{ height: '127mm', padding: '8mm 12mm', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
     {/* Header */}
     <div style={{ textAlign: 'center', borderBottom: '2px solid #92400e', paddingBottom: '6px', marginBottom: '8px' }}>
@@ -107,9 +109,15 @@ const ReciboSection: React.FC<{
             <td style={s.label}>Apoyo de Gasolina</td>
             <td style={s.value}>{formatCurrency(salary.apoyoGasolina)}</td>
           </tr>
+          {comision > 0 && (
+            <tr style={s.row}>
+              <td style={{ ...s.label, color: '#92400e' }}>Comisiones</td>
+              <td style={{ ...s.value, color: '#92400e' }}>{formatCurrency(comision)}</td>
+            </tr>
+          )}
           <tr style={{ backgroundColor: '#f0fdf4', borderBottom: '2px solid #166534' }}>
             <td style={{ ...s.label, fontWeight: 'bold' }}>Total Percepciones</td>
-            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '13px' }}>{formatCurrency(salary.totalPercepciones)}</td>
+            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '13px' }}>{formatCurrency(salary.totalPercepciones + comision)}</td>
           </tr>
           <tr style={{ backgroundColor: '#991b1b', color: '#fff' }}>
             <td style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 'bold' }}>DEDUCCIONES</td>
@@ -135,7 +143,7 @@ const ReciboSection: React.FC<{
       alignItems: 'center',
     }}>
       <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#92400e' }}>NETO A PAGAR</span>
-      <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#92400e' }}>{formatCurrency(salary.netoAPagar)}</span>
+      <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#92400e' }}>{formatCurrency(salary.netoAPagar + comision)}</span>
     </div>
 
     {/* Firmas */}
@@ -150,11 +158,11 @@ const ReciboSection: React.FC<{
   </div>
 );
 
-export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados, forPdf = false }) => {
+export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados, forPdf = false, comision = 0 }) => {
   const diasEnPeriodo = getDaysInQuincena(period);
   const salary = calculateSalary(employee, diasTrabajados, diasEnPeriodo);
   const fullName = getEmployeeFullName(employee);
-  const commonProps = { employee, period, diasTrabajados, diasEnPeriodo, salary, fullName };
+  const commonProps = { employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, comision };
 
   return (
     <div

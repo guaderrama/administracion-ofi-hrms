@@ -93,11 +93,25 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     setIsSaving(true);
     try {
       const name = reportName || generateReportName(sales);
+      // Calcular comisiones por empleado para guardar con el reporte
+      const empCommissions: Record<string, number> = {};
+      juevesDistribution.forEach(e => {
+        if (e.commission > 0) {
+          empCommissions[e.employeeCode] = (empCommissions[e.employeeCode] || 0) + e.commission;
+        }
+      });
+      semanaDistribution.forEach(e => {
+        if (e.commission > 0) {
+          empCommissions[e.employeeCode] = (empCommissions[e.employeeCode] || 0) + e.commission;
+        }
+      });
+
+      const reportData = { name, fileName, settings, sales, presentMap, status: 'active' as const, employeeCommissions: empCommissions };
       if (currentReportId) {
-        await commissionsService.update(currentReportId, { name, settings, sales, presentMap, fileName, status: 'active' });
+        await commissionsService.update(currentReportId, reportData);
         toast.success('Reporte actualizado.');
       } else {
-        const id = await commissionsService.save({ name, fileName, settings, sales, presentMap, status: 'active' });
+        const id = await commissionsService.save(reportData);
         setCurrentReportId(id);
         toast.success('Reporte guardado.');
       }
@@ -440,7 +454,14 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
                 }`}
               >
                 <div className="flex-1 cursor-pointer" onClick={() => handleLoadReport(report)}>
-                  <p className="font-medium text-slate-800">{report.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-slate-800">{report.name}</p>
+                    {report.lockedByPayroll && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+                        🔒 {report.lockedByPayroll}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-500">
                     {report.fileName} — {report.sales?.length || 0} ventas —
                     {report.createdAt instanceof Date ? report.createdAt.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}
@@ -451,14 +472,16 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
                     onClick={() => handleLoadReport(report)}
                     className="px-3 py-1 text-xs font-medium text-amber-700 bg-amber-100 rounded-md hover:bg-amber-200 transition-colors"
                   >
-                    Cargar
+                    {report.lockedByPayroll ? 'Ver' : 'Cargar'}
                   </button>
-                  <button
-                    onClick={() => setDeleteConfirm({ isOpen: true, report })}
-                    className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200 transition-colors"
-                  >
-                    Eliminar
-                  </button>
+                  {!report.lockedByPayroll && (
+                    <button
+                      onClick={() => setDeleteConfirm({ isOpen: true, report })}
+                      className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200 transition-colors"
+                    >
+                      Eliminar
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

@@ -1541,14 +1541,16 @@ const COMMISSIONS_COLLECTION = 'commission_reports';
 
 export interface SavedCommissionReport {
   id?: string;
-  name: string; // nombre descriptivo (ej: "Semana 21 Mayo 2026")
-  fileName: string; // nombre del CSV original
+  name: string;
+  fileName: string;
   createdAt: any;
   updatedAt: any;
-  settings: any; // CommissionSettings
-  sales: any[]; // SaleGroup[]
+  settings: any;
+  sales: any[];
   presentMap: Record<string, boolean>;
   status: 'active' | 'archived';
+  lockedByPayroll?: string; // ej: "2da Quincena Mayo 2026" — si tiene valor, no se puede editar
+  employeeCommissions?: Record<string, number>; // { [employeeCode]: amount } — comisión calculada por empleado
 }
 
 export const commissionsService = {

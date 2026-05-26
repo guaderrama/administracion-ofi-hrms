@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
-import { employeesService, logsService, attendanceDaysService, payrollCutsService, type PayrollCut } from '../src/services/firestoreService';
+import { employeesService, logsService, attendanceDaysService, payrollCutsService, commissionsService, type PayrollCut, type SavedCommissionReport } from '../src/services/firestoreService';
 import { NominasPdfPreview } from './NominasPdfPreview';
 import {
   PayrollPeriod,
@@ -39,6 +39,10 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const [savingCut, setSavingCut] = useState(false);
   const [showSavedCuts, setShowSavedCuts] = useState(false);
 
+  // Comisiones
+  const [commissionReports, setCommissionReports] = useState<SavedCommissionReport[]>([]);
+  const [selectedCommissionIds, setSelectedCommissionIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     const unsubscribe = employeesService.subscribe((emps) => setEmployees(emps));
     return () => unsubscribe();
@@ -48,6 +52,38 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     const unsubscribe = payrollCutsService.subscribe((cuts) => setSavedCuts(cuts));
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = commissionsService.subscribe((reports) => setCommissionReports(reports));
+    return () => unsubscribe();
+  }, []);
+
+  // Reportes de comisiones disponibles (no bloqueados por otro corte)
+  const availableCommissions = useMemo(() => {
+    return commissionReports.filter(r => !r.lockedByPayroll && r.sales?.length > 0);
+  }, [commissionReports]);
+
+  // Comisiones por empleado de los reportes seleccionados
+  const employeeCommissions = useMemo((): Record<string, number> => {
+    const totals: Record<string, number> = {};
+    selectedCommissionIds.forEach(reportId => {
+      const report = commissionReports.find(r => r.id === reportId);
+      if (!report?.employeeCommissions) return;
+      Object.entries(report.employeeCommissions).forEach(([code, amount]) => {
+        totals[code] = (totals[code] || 0) + (amount as number);
+      });
+    });
+    return totals;
+  }, [selectedCommissionIds, commissionReports]);
+
+  const toggleCommissionReport = (reportId: string) => {
+    setSelectedCommissionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(reportId)) next.delete(reportId);
+      else next.add(reportId);
+      return next;
+    });
+  };
 
   const diasEnPeriodo = getDaysInQuincena(selectedPeriod);
   const [loadingAttendance, setLoadingAttendance] = useState(false);
@@ -262,7 +298,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           bonoPuntualidad: salary.bonoPuntualidad,
           bonoObjetivos: salary.bonoObjetivos,
           apoyoGasolina: salary.apoyoGasolina,
-          total: salary.netoAPagar,
+          comision: employeeCommissions[emp.codigo] || 0,
+          total: salary.netoAPagar + (employeeCommissions[emp.codigo] || 0),
         };
       });
       const cutTotals = cutEmployees.reduce(
@@ -270,6 +307,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           bonoPuntualidad: acc.bonoPuntualidad + e.bonoPuntualidad,
           bonoObjetivos: acc.bonoObjetivos + e.bonoObjetivos,
           apoyoGasolina: acc.apoyoGasolina + e.apoyoGasolina,
+          comision: (acc as any).comision ? (acc as any).comision + (e as any).comision : (e as any).comision,
           total: acc.total + e.total,
         }),
         { bonoPuntualidad: 0, bonoObjetivos: 0, apoyoGasolina: 0, total: 0 }
@@ -284,6 +322,17 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         createdBy: user?.email || '',
         createdAt: new Date(),
       });
+
+      // Bloquear comisiones seleccionadas con candado
+      const periodLabel = getPeriodLabel(selectedPeriod);
+      for (const reportId of selectedCommissionIds) {
+        try {
+          await commissionsService.update(reportId, { lockedByPayroll: periodLabel });
+        } catch (err) {
+          console.error('Error bloqueando comisión:', err);
+        }
+      }
+      setSelectedCommissionIds(new Set());
     } finally {
       setSavingCut(false);
     }
@@ -418,6 +467,47 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         </div>
       </Card>
 
+      {/* Comisiones disponibles */}
+      {availableCommissions.length > 0 && (
+        <Card className="mb-6">
+          <h2 className="text-lg font-semibold text-slate-800 mb-3">Incluir Comisiones en este Corte</h2>
+          <p className="text-sm text-slate-500 mb-4">Selecciona los reportes de comisiones que corresponden a este periodo de nómina.</p>
+          <div className="space-y-2">
+            {availableCommissions.map(report => (
+              <label
+                key={report.id}
+                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  selectedCommissionIds.has(report.id!)
+                    ? 'border-amber-400 bg-amber-50'
+                    : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedCommissionIds.has(report.id!)}
+                  onChange={() => toggleCommissionReport(report.id!)}
+                  className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                />
+                <div className="flex-1">
+                  <p className="font-medium text-slate-800 text-sm">{report.name}</p>
+                  <p className="text-xs text-slate-500">{report.sales?.length || 0} ventas — {report.fileName}</p>
+                </div>
+                {report.employeeCommissions && (
+                  <span className="text-sm font-bold text-amber-800">
+                    {formatCurrency(Object.values(report.employeeCommissions).reduce((a, b) => a + (b as number), 0))}
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+          {!availableCommissions.some(r => r.employeeCommissions) && (
+            <p className="mt-3 text-xs text-red-600 bg-red-50 p-2 rounded">
+              Los reportes no tienen comisiones por empleado calculadas. Ve al módulo de Comisiones y guarda los reportes con la distribución calculada.
+            </p>
+          )}
+        </Card>
+      )}
+
       {/* Employee Table */}
       <Card className="mb-6">
         <div className="flex justify-between items-center mb-4">
@@ -456,6 +546,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Puntualidad</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Bono Objetivos</th>
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Apoyo Gasolina</th>
+                {selectedCommissionIds.size > 0 && <th className="text-right py-3 px-2 font-semibold text-amber-700 text-xs">Comisiones</th>}
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Total</th>
                 {canEdit && <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Acciones</th>}
               </tr>
@@ -500,7 +591,14 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoPuntualidad)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoObjetivos)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.apoyoGasolina)}</td>
-                    <td className="py-3 px-2 text-right font-bold text-amber-800">{formatCurrency(salary.netoAPagar)}</td>
+                    {selectedCommissionIds.size > 0 && (
+                      <td className="py-3 px-2 text-right text-sm text-amber-700 font-semibold">
+                        {formatCurrency(employeeCommissions[emp.codigo] || 0)}
+                      </td>
+                    )}
+                    <td className="py-3 px-2 text-right font-bold text-amber-800">
+                      {formatCurrency(salary.netoAPagar + (employeeCommissions[emp.codigo] || 0))}
+                    </td>
                     {canEdit && (
                       <td className="py-3 px-2 text-center">
                         <button
@@ -522,7 +620,14 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoPuntualidad)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoObjetivos)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.apoyoGasolina)}</td>
-                <td className="py-3 px-2 text-right font-bold text-amber-800 text-base">{formatCurrency(totals.total)}</td>
+                {selectedCommissionIds.size > 0 && (
+                  <td className="py-3 px-2 text-right font-bold text-amber-700">
+                    {formatCurrency(Object.values(employeeCommissions).reduce((a, b) => a + b, 0))}
+                  </td>
+                )}
+                <td className="py-3 px-2 text-right font-bold text-amber-800 text-base">
+                  {formatCurrency(totals.total + Object.values(employeeCommissions).reduce((a, b) => a + b, 0))}
+                </td>
                 {canEdit && <td></td>}
               </tr>
             </tfoot>
@@ -659,6 +764,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                     employee={selectedEmployee}
                     period={selectedPeriod}
                     diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
+                    comision={employeeCommissions[selectedEmployee.codigo] || 0}
                   />
               </div>
             </div>
@@ -691,6 +797,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             employee={selectedEmployee}
             period={selectedPeriod}
             diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
+            comision={employeeCommissions[selectedEmployee.codigo] || 0}
             forPdf
           />
         </div>
