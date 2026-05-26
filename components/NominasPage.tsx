@@ -37,6 +37,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingProgress, setGeneratingProgress] = useState({ current: 0, total: 0 });
   const [daysWorked, setDaysWorked] = useState<Record<string, number>>({});
+  const [originalDays, setOriginalDays] = useState<Record<string, number>>({}); // días calculados por asistencia
+  const [employeeNotes, setEmployeeNotes] = useState<Record<string, string>>({});
   const [savedCuts, setSavedCuts] = useState<PayrollCut[]>([]);
   const [savingCut, setSavingCut] = useState(false);
   const [showSavedCuts, setShowSavedCuts] = useState(false);
@@ -259,6 +261,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         });
 
         setDaysWorked(updated);
+        setOriginalDays(updated);
         setAttendanceError(null);
       } catch (error) {
         console.error('Error cargando asistencia:', error);
@@ -368,6 +371,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         apoyoGasolina: salary.apoyoGasolina,
         comision: employeeCommissions[emp.codigo] || 0,
         total: salary.netoAPagar + (employeeCommissions[emp.codigo] || 0),
+        corregido: days !== (originalDays[emp.id] ?? diasEnPeriodo),
+        nota: employeeNotes[emp.id] || '',
       };
     });
     const cutTotals = cutEmployees.reduce(
@@ -400,7 +405,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         status: 'borrador' as const,
         commissionReportIds: [...selectedCommissionIds],
         daysWorked,
-      };
+        employeeNotes,
+      } as any;
       if (currentCutId) {
         await payrollCutsService.update(currentCutId, cutData);
       } else {
@@ -431,7 +437,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         status: 'cerrado' as const,
         commissionReportIds: [...selectedCommissionIds],
         daysWorked,
-      };
+        employeeNotes,
+      } as any;
       if (currentCutId) {
         await payrollCutsService.update(currentCutId, cutData);
       } else {
@@ -457,12 +464,10 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const handleLoadDraft = (cut: PayrollCut) => {
     if (cut.status === 'cerrado') return;
     setCurrentCutId(cut.id || null);
-    // Restaurar periodo
     setSelectedPeriod({ startDate: cut.startDate, endDate: cut.endDate, quincena: cut.quincena as 1 | 2 });
-    // Restaurar días trabajados
     if (cut.daysWorked) setDaysWorked(cut.daysWorked);
-    // Restaurar comisiones seleccionadas
     if (cut.commissionReportIds) setSelectedCommissionIds(new Set(cut.commissionReportIds));
+    if ((cut as any).employeeNotes) setEmployeeNotes((cut as any).employeeNotes);
   };
 
   // Descargar corte como Excel CSV
@@ -698,22 +703,40 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                       </StatusBadge>
                     </td>
                     <td className="py-3 px-2 text-center">
-                      {canEdit ? (
-                        <input
-                          type="number"
-                          min={0}
-                          max={diasEnPeriodo}
-                          value={days}
-                          onChange={(e) => {
-                            const val = Math.max(0, Math.min(diasEnPeriodo, parseInt(e.target.value) || 0));
-                            setDaysWorked((prev) => ({ ...prev, [emp.id]: val }));
-                          }}
-                          className="w-14 text-center px-1 py-1 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                        />
-                      ) : (
-                        <span className="text-sm font-medium">{days}</span>
-                      )}
-                      <span className="text-xs text-slate-400 ml-1">/{diasEnPeriodo}</span>
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="flex items-center gap-1">
+                          {canEdit ? (
+                            <input
+                              type="number"
+                              min={0}
+                              max={diasEnPeriodo}
+                              value={days}
+                              onChange={(e) => {
+                                const val = Math.max(0, Math.min(diasEnPeriodo, parseInt(e.target.value) || 0));
+                                setDaysWorked((prev) => ({ ...prev, [emp.id]: val }));
+                              }}
+                              className={`w-14 text-center px-1 py-1 border rounded-md text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 ${
+                                days !== (originalDays[emp.id] ?? diasEnPeriodo) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'
+                              }`}
+                            />
+                          ) : (
+                            <span className="text-sm font-medium">{days}</span>
+                          )}
+                          <span className="text-xs text-slate-400">/{diasEnPeriodo}</span>
+                        </div>
+                        {days !== (originalDays[emp.id] ?? diasEnPeriodo) && (
+                          <div className="w-full">
+                            <span className="text-[10px] text-amber-700 font-medium">✏️ Corregido</span>
+                            <input
+                              type="text"
+                              placeholder="Nota..."
+                              value={employeeNotes[emp.id] || ''}
+                              onChange={(e) => setEmployeeNotes(prev => ({ ...prev, [emp.id]: e.target.value }))}
+                              className="mt-0.5 w-full px-1.5 py-0.5 text-[10px] border border-amber-300 rounded bg-amber-50 focus:ring-1 focus:ring-amber-400"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoPuntualidad)}</td>
                     <td className="py-3 px-2 text-right text-sm">{formatCurrency(salary.bonoObjetivos)}</td>
