@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
-import { employeesService } from '../src/services/firestoreService';
+import { employeesService, commissionsService, type SavedCommissionReport } from '../src/services/firestoreService';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { AccessDenied } from './ui/AccessDenied';
 import { Card } from './ui/Card';
 import { useToast } from './ui/Toast';
@@ -10,6 +11,7 @@ import {
   calculateCommissions,
   distributeJuevesCommission,
   distributeSemanaCommission,
+  getCommissionableBase,
   DEFAULT_SETTINGS,
   formatMXN,
 } from '../utils/commissionUtils';
@@ -29,6 +31,13 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
   const [activeTab, setActiveTab] = useState<'upload' | 'jueves' | 'semana'>('upload');
   const [fileName, setFileName] = useState('');
 
+  // Persistencia
+  const [savedReports, setSavedReports] = useState<SavedCommissionReport[]>([]);
+  const [currentReportId, setCurrentReportId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [reportName, setReportName] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; report: SavedCommissionReport | null }>({ isOpen: false, report: null });
+
   useEffect(() => {
     const unsub = employeesService.subscribe(emps => {
       setEmployees(emps);
@@ -43,6 +52,83 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     });
     return () => unsub();
   }, []);
+
+  // Cargar reportes guardados
+  useEffect(() => {
+    const unsub = commissionsService.subscribe(reports => setSavedReports(reports));
+    return () => unsub();
+  }, []);
+
+  // Guardar reporte actual
+  const handleSaveReport = async () => {
+    if (sales.length === 0) return;
+    setIsSaving(true);
+    try {
+      const name = reportName || `Comisiones ${fileName || new Date().toLocaleDateString('es-MX')}`;
+      if (currentReportId) {
+        await commissionsService.update(currentReportId, { name, settings, sales, presentMap, fileName, status: 'active' });
+        toast.success('Reporte actualizado.');
+      } else {
+        const id = await commissionsService.save({ name, fileName, settings, sales, presentMap, status: 'active' });
+        setCurrentReportId(id);
+        toast.success('Reporte guardado.');
+      }
+    } catch (err) {
+      console.error('Error guardando reporte:', err);
+      toast.error('Error al guardar reporte.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Cargar reporte guardado
+  const handleLoadReport = (report: SavedCommissionReport) => {
+    setSales(report.sales || []);
+    setSettings(report.settings || DEFAULT_SETTINGS);
+    setPresentMap(prev => {
+      const merged: Record<string, boolean> = {};
+      employees.forEach(emp => { merged[emp.id] = true; });
+      if (report.presentMap) {
+        Object.keys(report.presentMap).forEach(k => { if (k in merged) merged[k] = report.presentMap[k]; });
+      }
+      return merged;
+    });
+    setFileName(report.fileName || '');
+    setReportName(report.name || '');
+    setCurrentReportId(report.id || null);
+    setActiveTab('jueves');
+    toast.success(`Reporte "${report.name}" cargado.`);
+  };
+
+  // Eliminar reporte
+  const confirmDeleteReport = async () => {
+    const report = deleteConfirm.report;
+    if (!report?.id) return;
+    setDeleteConfirm({ isOpen: false, report: null });
+    try {
+      await commissionsService.delete(report.id);
+      if (currentReportId === report.id) {
+        setCurrentReportId(null);
+        setSales([]);
+        setReportName('');
+        setActiveTab('upload');
+      }
+      toast.success('Reporte eliminado.');
+    } catch (err) {
+      console.error('Error eliminando reporte:', err);
+      toast.error('Error al eliminar reporte.');
+    }
+  };
+
+  // Nuevo reporte (limpiar todo)
+  const handleNewReport = () => {
+    setSales([]);
+    setCurrentReportId(null);
+    setFileName('');
+    setReportName('');
+    setSettings(DEFAULT_SETTINGS);
+    setActiveTab('upload');
+  };
 
   // Parsear CSV
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,6 +176,25 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
   const juevesVentas = useMemo(() => sales.filter(s => !s.isExcluded && s.dayOfWeek === 4), [sales]);
   const semanaVentas = useMemo(() => sales.filter(s => !s.isExcluded && s.dayOfWeek !== 4), [sales]);
 
+  // Desglose de líneas por categoría (para verificación)
+  const juevesLinesByCategory = useMemo(() => {
+    const lines: { folio: string; details: string; totalUSD: number; baseMXN: number; category: string; paymentMethod: string }[] = [];
+    juevesVentas.forEach(sale => {
+      sale.lines.forEach(line => {
+        const baseMXN = getCommissionableBase(line.total, sale.paymentMethod, settings);
+        lines.push({
+          folio: sale.receiptNum,
+          details: line.details,
+          totalUSD: line.total,
+          baseMXN,
+          category: line.category,
+          paymentMethod: sale.paymentMethod,
+        });
+      });
+    });
+    return lines;
+  }, [juevesVentas, settings]);
+
   const handleSettingChange = (key: keyof CommissionSettings, value: string) => {
     setSettings(prev => ({ ...prev, [key]: parseFloat(value) || 0 }));
   };
@@ -103,6 +208,32 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
         <h1 className="font-serif text-3xl font-bold text-slate-900">Comisiones</h1>
         <p className="text-slate-600">Cálculo de comisiones semanales y de caminata (jueves)</p>
       </header>
+
+      {/* Barra de acciones */}
+      {sales.length > 0 && (
+        <div className="flex items-center gap-3 mb-4">
+          <input
+            type="text"
+            value={reportName}
+            onChange={e => setReportName(e.target.value)}
+            placeholder="Nombre del reporte (ej: Semana 21 Mayo)"
+            className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-400"
+          />
+          <button
+            onClick={handleSaveReport}
+            disabled={isSaving}
+            className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-emerald-600 to-green-600 rounded-lg hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 transition-colors"
+          >
+            {isSaving ? 'Guardando...' : currentReportId ? 'Actualizar' : 'Guardar'}
+          </button>
+          <button
+            onClick={handleNewReport}
+            className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
+          >
+            Nuevo
+          </button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-slate-100 rounded-lg p-1">
@@ -131,10 +262,10 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
             <SettingInput label="IVA %" value={settings.ivaPercent} onChange={v => handleSettingChange('ivaPercent', v)} />
             <SettingInput label="Com. Bancaria %" value={settings.bankFeePercent} onChange={v => handleSettingChange('bankFeePercent', v)} />
             <SettingInput label="Tipo Cambio USD" value={settings.exchangeRate} onChange={v => handleSettingChange('exchangeRate', v)} />
-            <SettingInput label="Retail % Jue" value={settings.retailPercentJueves} onChange={v => handleSettingChange('retailPercentJueves', v)} />
+            <SettingInput label="Joyería % Jue" value={settings.joyeriaPercentJueves} onChange={v => handleSettingChange('joyeriaPercentJueves', v)} />
             <SettingInput label="Souvenirs % Jue" value={settings.souvenirsPercentJueves} onChange={v => handleSettingChange('souvenirsPercentJueves', v)} />
             <SettingInput label="Originales % Jue" value={settings.originalesPercentJueves} onChange={v => handleSettingChange('originalesPercentJueves', v)} />
-            <SettingInput label="Retail % Sem" value={settings.retailPercentSemana} onChange={v => handleSettingChange('retailPercentSemana', v)} />
+            <SettingInput label="Joyería % Sem" value={settings.joyeriaPercentSemana} onChange={v => handleSettingChange('joyeriaPercentSemana', v)} />
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mt-2">
             <SettingInput label="Souvenirs % Sem" value={settings.souvenirsPercentSemana} onChange={v => handleSettingChange('souvenirsPercentSemana', v)} />
@@ -208,6 +339,55 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
         </Card>
       )}
 
+      {/* Reportes guardados — siempre visible en tab upload */}
+      {activeTab === 'upload' && savedReports.length > 0 && (
+        <Card className="mt-6">
+          <h3 className="text-lg font-bold text-slate-800 mb-4">Reportes Guardados ({savedReports.length})</h3>
+          <div className="space-y-2">
+            {savedReports.map(report => (
+              <div
+                key={report.id}
+                className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                  currentReportId === report.id ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex-1 cursor-pointer" onClick={() => handleLoadReport(report)}>
+                  <p className="font-medium text-slate-800">{report.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {report.fileName} — {report.sales?.length || 0} ventas —
+                    {report.createdAt instanceof Date ? report.createdAt.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}
+                  </p>
+                </div>
+                <div className="flex gap-2 ml-4">
+                  <button
+                    onClick={() => handleLoadReport(report)}
+                    className="px-3 py-1 text-xs font-medium text-amber-700 bg-amber-100 rounded-md hover:bg-amber-200 transition-colors"
+                  >
+                    Cargar
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirm({ isOpen: true, report })}
+                    className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200 transition-colors"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Confirmación de eliminar */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        title="Eliminar Reporte"
+        message={deleteConfirm.report ? `¿Eliminar "${deleteConfirm.report.name}"? Esta acción no se puede deshacer.` : ''}
+        variant="danger"
+        onConfirm={confirmDeleteReport}
+        onCancel={() => setDeleteConfirm({ isOpen: false, report: null })}
+      />
+
       {/* TAB: Jueves (Caminata) */}
       {activeTab === 'jueves' && juevesSummary && (
         <div className="space-y-6">
@@ -222,7 +402,7 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
               )}
             </h3>
             <div className="grid grid-cols-3 gap-4 mb-4">
-              <SummaryCard label="Retail" base={juevesSummary.retailTotal} commission={juevesSummary.retailCommission} pct={settings.retailPercentJueves} color="blue" />
+              <SummaryCard label="Joyería" base={juevesSummary.joyeriaTotal} commission={juevesSummary.joyeriaCommission} pct={settings.joyeriaPercentJueves} color="blue" />
               <SummaryCard label="Souvenirs" base={juevesSummary.souvenirsTotal} commission={juevesSummary.souvenirsCommission} pct={settings.souvenirsPercentJueves} color="green" />
               <SummaryCard label="Originales" base={juevesSummary.originalesTotal} commission={juevesSummary.originalesCommission} pct={settings.originalesPercentJueves} color="purple" />
             </div>
@@ -231,6 +411,48 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
               <span className="text-2xl font-bold text-amber-900">{formatMXN(juevesSummary.totalCommission)}</span>
             </div>
           </Card>
+
+          {/* Desglose por categoría */}
+          {(['joyeria', 'souvenirs', 'originales'] as const).map(cat => {
+            const catLines = juevesLinesByCategory.filter(l => l.category === cat);
+            if (catLines.length === 0) return null;
+            const catLabel = cat === 'joyeria' ? 'Joyería' : cat === 'souvenirs' ? 'Souvenirs' : 'Originales';
+            const catColor = cat === 'joyeria' ? 'blue' : cat === 'souvenirs' ? 'green' : 'purple';
+            return (
+              <Card key={cat}>
+                <h3 className={`text-sm font-bold text-${catColor}-700 mb-2`}>Desglose {catLabel} ({catLines.length} líneas)</h3>
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr>
+                        <th className="py-2 px-3 text-left">Folio</th>
+                        <th className="py-2 px-3 text-left">Detalle</th>
+                        <th className="py-2 px-3 text-left">Pago</th>
+                        <th className="py-2 px-3 text-right">USD</th>
+                        <th className="py-2 px-3 text-right">Base MXN</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {catLines.map((line, i) => (
+                        <tr key={`${line.folio}-${i}`}>
+                          <td className="py-1.5 px-3 font-mono">{line.folio}</td>
+                          <td className="py-1.5 px-3 max-w-xs truncate">{line.details}</td>
+                          <td className="py-1.5 px-3">{line.paymentMethod}</td>
+                          <td className="py-1.5 px-3 text-right">${line.totalUSD.toFixed(2)}</td>
+                          <td className="py-1.5 px-3 text-right font-semibold">{formatMXN(line.baseMXN)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-slate-50 font-bold">
+                        <td colSpan={3} className="py-2 px-3">Total {catLabel}</td>
+                        <td className="py-2 px-3 text-right">${catLines.reduce((s, l) => s + l.totalUSD, 0).toFixed(2)}</td>
+                        <td className="py-2 px-3 text-right">{formatMXN(catLines.reduce((s, l) => s + l.baseMXN, 0))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            );
+          })}
 
           {/* Distribución entre empleados */}
           <Card>
@@ -300,7 +522,7 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
               )}
             </h3>
             <div className="grid grid-cols-3 gap-4 mb-4">
-              <SummaryCard label="Retail" base={semanaSummary.retailTotal} commission={semanaSummary.retailCommission} pct={settings.retailPercentSemana} color="blue" />
+              <SummaryCard label="Joyería" base={semanaSummary.joyeriaTotal} commission={semanaSummary.joyeriaCommission} pct={settings.joyeriaPercentSemana} color="blue" />
               <SummaryCard label="Souvenirs" base={semanaSummary.souvenirsTotal} commission={semanaSummary.souvenirsCommission} pct={settings.souvenirsPercentSemana} color="green" />
               <SummaryCard label="Originales" base={semanaSummary.originalesTotal} commission={semanaSummary.originalesCommission} pct={settings.originalesPercentSemana} color="purple" />
             </div>

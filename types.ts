@@ -191,7 +191,7 @@ export interface IncomeEntry {
 
 // --- Comisiones ---
 
-export type ProductCategory = 'retail' | 'souvenirs' | 'originales';
+export type ProductCategory = 'joyeria' | 'souvenirs' | 'originales';
 export type CommissionType = 'jueves' | 'semana';
 
 export interface SaleRecord {
@@ -236,10 +236,10 @@ export interface CommissionSettings {
   ivaPercent: number; // default 16
   bankFeePercent: number; // default 4
   exchangeRate: number; // USD to MXN
-  retailPercentJueves: number; // default 5
+  joyeriaPercentJueves: number; // default 5
   souvenirsPercentJueves: number; // default 25
   originalesPercentJueves: number; // editable
-  retailPercentSemana: number; // editable
+  joyeriaPercentSemana: number; // editable
   souvenirsPercentSemana: number; // editable
   originalesPercentSemana: number; // editable
 }
@@ -249,10 +249,10 @@ export interface CommissionSummary {
   dateRange: { start: string; end: string };
   totalSales: number;
   excludedSales: number;
-  retailTotal: number;
+  joyeriaTotal: number;
   souvenirsTotal: number;
   originalesTotal: number;
-  retailCommission: number;
+  joyeriaCommission: number;
   souvenirsCommission: number;
   originalesCommission: number;
   totalCommission: number;

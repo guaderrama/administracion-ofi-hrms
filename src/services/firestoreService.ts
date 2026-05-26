@@ -1534,6 +1534,73 @@ export const attendanceDaysService = {
 };
 
 // ============================================
+// COMISIONES GUARDADAS (commission_reports)
+// ============================================
+
+const COMMISSIONS_COLLECTION = 'commission_reports';
+
+export interface SavedCommissionReport {
+  id?: string;
+  name: string; // nombre descriptivo (ej: "Semana 21 Mayo 2026")
+  fileName: string; // nombre del CSV original
+  createdAt: any;
+  updatedAt: any;
+  settings: any; // CommissionSettings
+  sales: any[]; // SaleGroup[]
+  presentMap: Record<string, boolean>;
+  status: 'active' | 'archived';
+}
+
+export const commissionsService = {
+  async save(report: Omit<SavedCommissionReport, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+    const docRef = await addDoc(collection(db, COMMISSIONS_COLLECTION), {
+      ...report,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  },
+
+  async update(id: string, data: Partial<SavedCommissionReport>): Promise<void> {
+    const { id: _, ...updateData } = data as any;
+    await updateDoc(doc(db, COMMISSIONS_COLLECTION, id), {
+      ...updateData,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
+  async delete(id: string): Promise<void> {
+    await deleteDoc(doc(db, COMMISSIONS_COLLECTION, id));
+  },
+
+  async getAll(): Promise<SavedCommissionReport[]> {
+    const q = query(collection(db, COMMISSIONS_COLLECTION), orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({
+      ...d.data(),
+      id: d.id,
+      createdAt: d.data().createdAt?.toDate?.() || new Date(),
+      updatedAt: d.data().updatedAt?.toDate?.() || new Date(),
+    })) as SavedCommissionReport[];
+  },
+
+  subscribe(callback: (reports: SavedCommissionReport[]) => void): () => void {
+    return onSnapshot(
+      query(collection(db, COMMISSIONS_COLLECTION), orderBy('createdAt', 'desc')),
+      (snapshot) => {
+        const reports = snapshot.docs.map(d => ({
+          ...d.data(),
+          id: d.id,
+          createdAt: d.data().createdAt?.toDate?.() || new Date(),
+          updatedAt: d.data().updatedAt?.toDate?.() || new Date(),
+        })) as SavedCommissionReport[];
+        callback(reports);
+      }
+    );
+  },
+};
+
+// ============================================
 // FUNCIÓN PARA LIMPIAR DUPLICADOS
 // ============================================
 

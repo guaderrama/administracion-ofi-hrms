@@ -19,7 +19,7 @@ const ORIGINAL_KEYWORDS = ['ORIGINAL', 'LIMITED EDITION'];
 function classifyProduct(details: string): ProductCategory {
   const upper = (details || '').toUpperCase();
   if (ORIGINAL_KEYWORDS.some(kw => upper.includes(kw))) return 'originales';
-  if (RETAIL_KEYWORDS.some(kw => upper.includes(kw))) return 'retail';
+  if (RETAIL_KEYWORDS.some(kw => upper.includes(kw))) return 'joyeria';
   return 'souvenirs';
 }
 
@@ -185,35 +185,37 @@ export const DEFAULT_SETTINGS: CommissionSettings = {
   ivaPercent: 16,
   bankFeePercent: 4,
   exchangeRate: 17.5,
-  retailPercentJueves: 5,
+  joyeriaPercentJueves: 5,
   souvenirsPercentJueves: 25,
   originalesPercentJueves: 10,
-  retailPercentSemana: 5,
+  joyeriaPercentSemana: 5,
   souvenirsPercentSemana: 25,
   originalesPercentSemana: 10,
 };
 
-/** Calcula la base comisionable descontando IVA y comisión bancaria si aplica */
+/**
+ * Calcula la base comisionable:
+ * 1. SIEMPRE convierte USD → MXN (todas las ventas del POS están en USD)
+ * 2. Si el pago fue con tarjeta MXN: descuenta IVA y comisión bancaria
+ */
 export function getCommissionableBase(
   amount: number,
   paymentMethod: string,
   settings: CommissionSettings,
 ): number {
+  // Paso 1: Convertir a MXN (el CSV siempre está en USD)
+  let mxn = amount * settings.exchangeRate;
+
+  // Paso 2: Si es pago con tarjeta MXN, descontar IVA y comisión bancaria
   const upper = (paymentMethod || '').toUpperCase();
-  const isCreditCardMXN = upper.includes('CREDIT CARD MNX') || upper.includes('CREDIT CARD MXN') || upper.includes('TARJETA');
+  const isCreditCardMXN = upper.includes('CREDIT CARD MNX') || upper.includes('CREDIT CARD MXN') || upper.includes('TARJETA') || upper.includes('AMERICAN EXPRESS MNX');
 
   if (isCreditCardMXN) {
-    // Descontar IVA y comisión bancaria
-    const sinIva = amount / (1 + settings.ivaPercent / 100);
-    return sinIva * (1 - settings.bankFeePercent / 100);
+    mxn = mxn / (1 + settings.ivaPercent / 100); // quitar IVA: / 1.16
+    mxn = mxn / (1 + settings.bankFeePercent / 100); // quitar com. bancaria: / 1.04
   }
 
-  const isUSD = upper.includes('USD') || upper.includes('CASH USD');
-  if (isUSD) {
-    return amount * settings.exchangeRate;
-  }
-
-  return amount;
+  return mxn;
 }
 
 /** Calcula comisiones por tipo (jueves/semana) */
@@ -229,7 +231,7 @@ export function calculateCommissions(
     return s.dayOfWeek !== 4; // semana = todos menos jueves
   });
 
-  let retailTotal = 0;
+  let joyeriaTotal = 0;
   let souvenirsTotal = 0;
   let originalesTotal = 0;
 
@@ -239,7 +241,7 @@ export function calculateCommissions(
       sale.lines.forEach(line => {
         const base = getCommissionableBase(line.total, sale.paymentMethod, settings);
         switch (line.category) {
-          case 'retail': retailTotal += base; break;
+          case 'joyeria': joyeriaTotal += base; break;
           case 'originales': originalesTotal += base; break;
           default: souvenirsTotal += base; break;
         }
@@ -251,11 +253,11 @@ export function calculateCommissions(
     }
   });
 
-  const retailPct = type === 'jueves' ? settings.retailPercentJueves : settings.retailPercentSemana;
+  const joyeriaPct = type === 'jueves' ? settings.joyeriaPercentJueves : settings.joyeriaPercentSemana;
   const souvenirsPct = type === 'jueves' ? settings.souvenirsPercentJueves : settings.souvenirsPercentSemana;
   const originalesPct = type === 'jueves' ? settings.originalesPercentJueves : settings.originalesPercentSemana;
 
-  const retailCommission = Math.round(retailTotal * retailPct / 100 * 100) / 100;
+  const joyeriaCommission = Math.round(joyeriaTotal * joyeriaPct / 100 * 100) / 100;
   const souvenirsCommission = Math.round(souvenirsTotal * souvenirsPct / 100 * 100) / 100;
   const originalesCommission = Math.round(originalesTotal * originalesPct / 100 * 100) / 100;
 
@@ -267,13 +269,13 @@ export function calculateCommissions(
     dateRange: { start: dates[0] || '', end: dates[dates.length - 1] || '' },
     totalSales: filtered.length,
     excludedSales: sales.filter(s => s.isExcluded).length,
-    retailTotal: Math.round(retailTotal * 100) / 100,
+    joyeriaTotal: Math.round(joyeriaTotal * 100) / 100,
     souvenirsTotal: Math.round(souvenirsTotal * 100) / 100,
     originalesTotal: Math.round(originalesTotal * 100) / 100,
-    retailCommission,
+    joyeriaCommission,
     souvenirsCommission,
     originalesCommission,
-    totalCommission: Math.round((retailCommission + souvenirsCommission + originalesCommission) * 100) / 100,
+    totalCommission: Math.round((joyeriaCommission + souvenirsCommission + originalesCommission) * 100) / 100,
   };
 }
 
@@ -332,7 +334,7 @@ export function distributeSemanaCommission(
     });
 
     // Calcular comisión individual
-    let retailTotal = 0;
+    let joyeriaTotal = 0;
     let souvenirsTotal = 0;
     let originalesTotal = 0;
 
@@ -341,7 +343,7 @@ export function distributeSemanaCommission(
         sale.lines.forEach(line => {
           const base = getCommissionableBase(line.total, sale.paymentMethod, settings);
           switch (line.category) {
-            case 'retail': retailTotal += base; break;
+            case 'joyeria': joyeriaTotal += base; break;
             case 'originales': originalesTotal += base; break;
             default: souvenirsTotal += base; break;
           }
@@ -352,11 +354,11 @@ export function distributeSemanaCommission(
     });
 
     const commission =
-      Math.round(retailTotal * settings.retailPercentSemana / 100 * 100) / 100 +
+      Math.round(joyeriaTotal * settings.joyeriaPercentSemana / 100 * 100) / 100 +
       Math.round(souvenirsTotal * settings.souvenirsPercentSemana / 100 * 100) / 100 +
       Math.round(originalesTotal * settings.originalesPercentSemana / 100 * 100) / 100;
 
-    const totalSales = retailTotal + souvenirsTotal + originalesTotal;
+    const totalSales = joyeriaTotal + souvenirsTotal + originalesTotal;
 
     return {
       employeeCode: emp.codigo,

@@ -58,6 +58,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Commission Reports (reportes de comisiones)
+    match /commission_reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
     // Permission Requests collection (solicitudes de permisos)
     match /permission_requests/{requestId} {
       allow read: if isAuthenticated();
