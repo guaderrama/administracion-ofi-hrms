@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
-import { employeesService, logsService, attendanceDaysService, payrollCutsService, commissionsService, type PayrollCut, type SavedCommissionReport } from '../src/services/firestoreService';
+import { employeesService, logsService, attendanceDaysService, payrollCutsService, commissionsService, vacationRequestsService, permissionsService, type PayrollCut, type SavedCommissionReport, type VacationRequestRecord } from '../src/services/firestoreService';
+import type { PermissionRequest } from '../types';
+import { Compensation } from '../types';
 import { NominasPdfPreview } from './NominasPdfPreview';
 import {
   PayrollPeriod,
@@ -57,6 +59,70 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     const unsubscribe = commissionsService.subscribe((reports) => setCommissionReports(reports));
     return () => unsubscribe();
   }, []);
+
+  // Vacaciones y permisos aprobados
+  const [approvedVacations, setApprovedVacations] = useState<VacationRequestRecord[]>([]);
+  const [approvedPermissions, setApprovedPermissions] = useState<PermissionRequest[]>([]);
+
+  useEffect(() => {
+    const unsub1 = vacationRequestsService.subscribe((reqs) => {
+      setApprovedVacations(reqs.filter(r => r.status === 'aprobada'));
+    });
+    const unsub2 = permissionsService.subscribe((reqs) => {
+      setApprovedPermissions(reqs.filter(r =>
+        r.adminApproval?.status === 'aprobado' &&
+        (r.compensation === Compensation.WITH_PAY || r.compensation === Compensation.VACATION)
+      ));
+    });
+    return () => { unsub1(); unsub2(); };
+  }, []);
+
+  // Días pagados por vacaciones/permisos por empleado en el periodo
+  const paidLeaveDays = useMemo((): Record<string, Set<string>> => {
+    const result: Record<string, Set<string>> = {};
+    employees.forEach(emp => { result[emp.id] = new Set(); });
+
+    const periodStart = selectedPeriod.startDate;
+    const periodEnd = selectedPeriod.endDate;
+
+    // Vacaciones aprobadas
+    approvedVacations.forEach(vac => {
+      const emp = employees.find(e => e.id === vac.employeeId || e.codigo === vac.employeeCode);
+      if (!emp) return;
+      (vac.dates || []).forEach(dateStr => {
+        if (dateStr >= periodStart && dateStr <= periodEnd) {
+          const d = new Date(dateStr + 'T12:00:00');
+          result[emp.id]?.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+        }
+      });
+    });
+
+    // Permisos aprobados con goce o a cuenta de vacaciones
+    approvedPermissions.forEach(perm => {
+      const empFullName = `${perm.lastName} ${perm.motherLastName} ${perm.firstName}`.toUpperCase().trim();
+      const emp = employees.find(e => {
+        const eName = `${e.paterno} ${e.materno} ${e.nombres}`.toUpperCase().trim();
+        return eName === empFullName || (empFullName.includes(e.paterno.toUpperCase()) && empFullName.includes(e.nombres.toUpperCase()));
+      });
+      if (!emp) return;
+
+      if (perm.permissionType === 'Días completos' && perm.dates) {
+        perm.dates.forEach(dateStr => {
+          if (dateStr >= periodStart && dateStr <= periodEnd) {
+            const d = new Date(dateStr + 'T12:00:00');
+            result[emp.id]?.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+          }
+        });
+      } else if (perm.permissionDate) {
+        if (perm.permissionDate >= periodStart && perm.permissionDate <= periodEnd) {
+          const d = new Date(perm.permissionDate + 'T12:00:00');
+          result[emp.id]?.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+        }
+      }
+    });
+
+    return result;
+  }, [employees, approvedVacations, approvedPermissions, selectedPeriod]);
 
   // Reportes de comisiones disponibles (no bloqueados por otro corte)
   const availableCommissions = useMemo(() => {
@@ -180,7 +246,10 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                   workedDays.add(dayKeyUnpadded);
                 }
               }
-              // Sin AttendanceDay ni logs → no cuenta
+              // Vacaciones o permisos aprobados con goce → contar como trabajado
+              if (!workedDays.has(dayKeyUnpadded) && paidLeaveDays[emp.id]?.has(dayKeyUnpadded)) {
+                workedDays.add(dayKeyUnpadded);
+              }
             }
 
             dayCursor.setDate(dayCursor.getDate() + 1);
