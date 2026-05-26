@@ -192,7 +192,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     const pdf = new jspdf.jsPDF({
       orientation: 'portrait',
       unit: 'mm',
-      format: 'a4',
+      format: 'letter',
     });
 
     const imgProps = pdf.getImageProperties(imgData);
@@ -206,12 +206,16 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     pdf.save(fileName);
   };
 
-  const handleGenerateSingle = async (employee: DetailedEmployee) => {
+  const handlePreview = (employee: DetailedEmployee) => {
     setSelectedEmployee(employee);
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!selectedEmployee) return;
     setIsGenerating(true);
     try {
       await new Promise(resolve => setTimeout(resolve, 300));
-      await generatePdf(employee);
+      await generatePdf(selectedEmployee);
     } catch (error) {
       console.error('Error generating PDF:', error);
     } finally {
@@ -500,7 +504,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                     {canEdit && (
                       <td className="py-3 px-2 text-center">
                         <button
-                          onClick={() => handleGenerateSingle(emp)}
+                          onClick={() => handlePreview(emp)}
                           disabled={isGenerating}
                           className="px-3 py-1 bg-amber-100 text-amber-800 rounded-md text-xs font-medium hover:bg-amber-200 disabled:opacity-50 transition-colors"
                         >
@@ -628,31 +632,67 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         </Card>
       )}
 
-      {/* PDF Preview */}
+      {/* Modal de Vista Previa del Recibo */}
       {selectedEmployee && (
-        <div className="mb-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-slate-800">
-              Vista Previa - {getEmployeeFullName(selectedEmployee)}
-            </h2>
-            {!isGenerating && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => !isGenerating && setSelectedEmployee(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl max-h-[95vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex justify-between items-center p-5 border-b border-slate-200">
+              <h2 className="text-lg font-bold text-slate-800">
+                {getEmployeeFullName(selectedEmployee)}
+              </h2>
               <button
                 onClick={() => setSelectedEmployee(null)}
-                className="px-3 py-1 text-sm text-slate-600 hover:text-slate-800 border border-slate-300 rounded-lg hover:bg-slate-50"
+                disabled={isGenerating}
+                className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
               >
-                Cerrar Vista Previa
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
-            )}
-          </div>
-          <div className="overflow-auto border border-slate-200 rounded-xl bg-white shadow-inner" style={{ maxHeight: '600px' }}>
-            <div style={{ transform: 'scale(0.7)', transformOrigin: 'top left', width: '142.8%' }}>
-              <NominasPdfPreview
-                employee={selectedEmployee}
-                period={selectedPeriod}
-                diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
-              />
+            </div>
+
+            {/* Preview */}
+            <div className="flex-1 overflow-auto p-4 bg-slate-50">
+              <div>
+                  <NominasPdfPreview
+                    employee={selectedEmployee}
+                    period={selectedPeriod}
+                    diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
+                  />
+              </div>
+            </div>
+
+            {/* Footer con botones */}
+            <div className="flex justify-end gap-3 p-5 border-t border-slate-200">
+              <button
+                onClick={() => setSelectedEmployee(null)}
+                disabled={isGenerating}
+                className="px-4 py-2 text-sm text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50 transition-colors"
+              >
+                Cerrar
+              </button>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={isGenerating}
+                className="px-5 py-2 text-sm font-medium text-white bg-gradient-to-r from-amber-600 to-orange-600 rounded-lg hover:from-amber-700 hover:to-orange-700 disabled:opacity-50 transition-colors"
+              >
+                {isGenerating ? 'Descargando...' : 'Descargar PDF'}
+              </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Versión oculta para generación de PDF (tamaño carta fijo) */}
+      {selectedEmployee && (
+        <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+          <NominasPdfPreview
+            employee={selectedEmployee}
+            period={selectedPeriod}
+            diasTrabajados={daysWorked[selectedEmployee.id] ?? diasEnPeriodo}
+            forPdf
+          />
         </div>
       )}
     </div>

@@ -13,6 +13,7 @@ interface NominasPdfPreviewProps {
   employee: DetailedEmployee;
   period: PayrollPeriod;
   diasTrabajados: number;
+  forPdf?: boolean;
 }
 
 const MESES = [
@@ -32,172 +33,151 @@ function getPaymentDate(period: PayrollPeriod): string {
   return `${end.getDate()} de ${MESES[end.getMonth()]} ${end.getFullYear()}`;
 }
 
-export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados }) => {
+const s = {
+  label: { padding: '4px 10px', fontSize: '12px', fontWeight: '600' as const },
+  value: { padding: '4px 10px', fontSize: '12px', textAlign: 'right' as const },
+  row: { borderBottom: '1px solid #e5e5e5' },
+};
+
+/** Un recibo individual — diseñado para ocupar exactamente media carta */
+const ReciboSection: React.FC<{
+  employee: DetailedEmployee;
+  period: PayrollPeriod;
+  diasTrabajados: number;
+  diasEnPeriodo: number;
+  salary: ReturnType<typeof calculateSalary>;
+  fullName: string;
+  copyLabel: string;
+}> = ({ employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, copyLabel }) => (
+  <div style={{ height: '127mm', padding: '8mm 12mm', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+    {/* Header */}
+    <div style={{ textAlign: 'center', borderBottom: '2px solid #92400e', paddingBottom: '6px', marginBottom: '8px' }}>
+      <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0', color: '#92400e', letterSpacing: '1px' }}>
+        IVAN GUADERRAMA ART
+      </h1>
+      <p style={{ fontSize: '12px', fontWeight: '600', margin: '2px 0 0 0', color: '#78350f' }}>
+        Recibo de Nómina Quincenal — <span style={{ fontSize: '10px', color: '#a3a3a3', fontStyle: 'italic' }}>{copyLabel}</span>
+      </p>
+    </div>
+
+    {/* Periodo + Pago */}
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '11px' }}>
+      <span><strong>Periodo:</strong> {getPeriodLabel(period)}</span>
+      <span><strong>Fecha de Pago:</strong> {getPaymentDate(period)}</span>
+    </div>
+
+    {/* Datos del colaborador */}
+    <div style={{ display: 'flex', gap: '16px', marginBottom: '6px', fontSize: '11px', backgroundColor: '#fefce8', border: '1px solid #d4d4d4', borderRadius: '4px', padding: '6px 10px' }}>
+      <div style={{ flex: 1 }}>
+        <div><strong>Código:</strong> {employee.codigo}</div>
+        <div><strong>Nombre:</strong> {fullName}</div>
+        <div><strong>Puesto:</strong> {employee.puesto || 'N/A'}</div>
+        <div><strong>RFC:</strong> {employee.rfc || 'N/A'}</div>
+      </div>
+      <div style={{ flex: 1 }}>
+        <div><strong>Departamento:</strong> {employee.departamento || 'N/A'}</div>
+        <div><strong>Fecha Ingreso:</strong> {formatDate(employee.fechaIngreso)}</div>
+        <div><strong>CURP:</strong> {employee.curp || 'N/A'}</div>
+        <div><strong>NSS:</strong> {employee.nss || 'N/A'}</div>
+      </div>
+      <div style={{ flex: 1 }}>
+        <div><strong>Días Trabajados:</strong> {diasTrabajados} de {diasEnPeriodo}</div>
+      </div>
+    </div>
+
+    {/* Percepciones y Deducciones */}
+    <div style={{ flex: 1 }}>
+      <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', border: '1px solid #d4d4d4' }}>
+        <thead>
+          <tr style={{ backgroundColor: '#166534', color: '#fff' }}>
+            <th style={{ padding: '5px 10px', textAlign: 'left', fontSize: '11px', fontWeight: 'bold' }}>PERCEPCIONES</th>
+            <th style={{ padding: '5px 10px', textAlign: 'right', fontSize: '11px' }}>IMPORTE</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style={s.row}>
+            <td style={s.label}>Bono de Puntualidad</td>
+            <td style={s.value}>{formatCurrency(salary.bonoPuntualidad)}</td>
+          </tr>
+          <tr style={s.row}>
+            <td style={s.label}>Bono de Objetivos</td>
+            <td style={s.value}>{formatCurrency(salary.bonoObjetivos)}</td>
+          </tr>
+          <tr style={s.row}>
+            <td style={s.label}>Apoyo de Gasolina</td>
+            <td style={s.value}>{formatCurrency(salary.apoyoGasolina)}</td>
+          </tr>
+          <tr style={{ backgroundColor: '#f0fdf4', borderBottom: '2px solid #166534' }}>
+            <td style={{ ...s.label, fontWeight: 'bold' }}>Total Percepciones</td>
+            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '13px' }}>{formatCurrency(salary.totalPercepciones)}</td>
+          </tr>
+          <tr style={{ backgroundColor: '#991b1b', color: '#fff' }}>
+            <td style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 'bold' }}>DEDUCCIONES</td>
+            <td style={{ padding: '5px 10px', textAlign: 'right', fontSize: '11px' }}></td>
+          </tr>
+          <tr style={{ backgroundColor: '#fef2f2' }}>
+            <td style={{ ...s.label, fontWeight: 'bold' }}>Total Deducciones</td>
+            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '13px' }}>{formatCurrency(salary.totalDeducciones)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    {/* Neto a Pagar */}
+    <div style={{
+      border: '2px solid #92400e',
+      borderRadius: '4px',
+      padding: '6px 12px',
+      margin: '6px 0',
+      backgroundColor: '#fffbeb',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    }}>
+      <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#92400e' }}>NETO A PAGAR</span>
+      <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#92400e' }}>{formatCurrency(salary.netoAPagar)}</span>
+    </div>
+
+    {/* Firmas */}
+    <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '4px' }}>
+      <div style={{ textAlign: 'center', width: '180px' }}>
+        <div style={{ borderTop: '1px solid #333', paddingTop: '4px', fontSize: '10px' }}>Firma del Colaborador</div>
+      </div>
+      <div style={{ textAlign: 'center', width: '180px' }}>
+        <div style={{ borderTop: '1px solid #333', paddingTop: '4px', fontSize: '10px' }}>Firma de la Empresa</div>
+      </div>
+    </div>
+  </div>
+);
+
+export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados, forPdf = false }) => {
   const diasEnPeriodo = getDaysInQuincena(period);
   const salary = calculateSalary(employee, diasTrabajados, diasEnPeriodo);
   const fullName = getEmployeeFullName(employee);
+  const commonProps = { employee, period, diasTrabajados, diasEnPeriodo, salary, fullName };
 
   return (
     <div
-      id="pdf-content-nomina"
+      id={forPdf ? 'pdf-content-nomina' : undefined}
       style={{
-        width: '210mm',
-        minHeight: '297mm',
-        padding: '20mm',
+        width: forPdf ? '216mm' : '100%',
         backgroundColor: '#ffffff',
         fontFamily: 'Arial, Helvetica, sans-serif',
-        fontSize: '12px',
         color: '#1a1a1a',
         boxSizing: 'border-box',
+        overflow: 'hidden',
       }}
     >
-      {/* Header */}
-      <div style={{ textAlign: 'center', marginBottom: '24px', borderBottom: '3px solid #92400e', paddingBottom: '16px' }}>
-        <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#92400e', letterSpacing: '2px' }}>
-          IVAN GUADERRAMA ART
-        </h1>
-        <p style={{ fontSize: '16px', fontWeight: '600', margin: '0', color: '#78350f' }}>
-          Recibo de Nómina Quincenal
-        </p>
-      </div>
+      <ReciboSection {...commonProps} copyLabel="Copia Empresa" />
 
-      {/* Period Info */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', fontSize: '11px' }}>
-        <div>
-          <strong>Periodo:</strong> {getPeriodLabel(period)}
-        </div>
-        <div>
-          <strong>Fecha de Pago:</strong> {getPaymentDate(period)}
-        </div>
-      </div>
-
-      {/* Employee Data */}
-      <div style={{ border: '1px solid #d4d4d4', borderRadius: '4px', padding: '16px', marginBottom: '20px', backgroundColor: '#fefce8' }}>
-        <h2 style={{ fontSize: '13px', fontWeight: 'bold', margin: '0 0 12px 0', color: '#92400e', textTransform: 'uppercase' }}>
-          Datos del Colaborador
-        </h2>
-        <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
-          <tbody>
-            <tr>
-              <td style={{ padding: '4px 8px', width: '35%' }}><strong>Código:</strong></td>
-              <td style={{ padding: '4px 8px' }}>{employee.codigo}</td>
-            </tr>
-            <tr>
-              <td style={{ padding: '4px 8px' }}><strong>Nombre:</strong></td>
-              <td style={{ padding: '4px 8px' }}>{fullName}</td>
-            </tr>
-            <tr>
-              <td style={{ padding: '4px 8px' }}><strong>Departamento:</strong></td>
-              <td style={{ padding: '4px 8px' }}>{employee.departamento || 'N/A'}</td>
-            </tr>
-            <tr>
-              <td style={{ padding: '4px 8px' }}><strong>Puesto:</strong></td>
-              <td style={{ padding: '4px 8px' }}>{employee.puesto || 'N/A'}</td>
-            </tr>
-            <tr>
-              <td style={{ padding: '4px 8px' }}><strong>Fecha de Ingreso:</strong></td>
-              <td style={{ padding: '4px 8px' }}>{formatDate(employee.fechaIngreso)}</td>
-            </tr>
-            <tr>
-              <td style={{ padding: '4px 8px' }}><strong>Días Trabajados:</strong></td>
-              <td style={{ padding: '4px 8px' }}>{diasTrabajados} de {diasEnPeriodo} días del periodo</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* Percepciones */}
-      <div style={{ border: '1px solid #d4d4d4', borderRadius: '4px', marginBottom: '20px', overflow: 'hidden' }}>
-        <div style={{ backgroundColor: '#166534', color: '#ffffff', padding: '8px 16px' }}>
-          <h2 style={{ fontSize: '13px', fontWeight: 'bold', margin: '0', textTransform: 'uppercase' }}>
-            Percepciones
-          </h2>
-        </div>
-        <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
-          <tbody>
-            <tr style={{ borderBottom: '1px solid #e5e5e5' }}>
-              <td style={{ padding: '10px 16px' }}>Bono de Puntualidad</td>
-              <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: '600' }}>
-                {formatCurrency(salary.bonoPuntualidad)}
-              </td>
-            </tr>
-            <tr style={{ borderBottom: '1px solid #e5e5e5' }}>
-              <td style={{ padding: '10px 16px' }}>Bono de Objetivos</td>
-              <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: '600' }}>
-                {formatCurrency(salary.bonoObjetivos)}
-              </td>
-            </tr>
-            <tr style={{ borderBottom: '2px solid #166534' }}>
-              <td style={{ padding: '10px 16px' }}>Apoyo de Gasolina</td>
-              <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: '600' }}>
-                {formatCurrency(salary.apoyoGasolina)}
-              </td>
-            </tr>
-            <tr style={{ backgroundColor: '#f0fdf4' }}>
-              <td style={{ padding: '10px 16px', fontWeight: 'bold' }}>Total Percepciones</td>
-              <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 'bold', fontSize: '13px' }}>
-                {formatCurrency(salary.totalPercepciones)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* Deducciones */}
-      <div style={{ border: '1px solid #d4d4d4', borderRadius: '4px', marginBottom: '20px', overflow: 'hidden' }}>
-        <div style={{ backgroundColor: '#991b1b', color: '#ffffff', padding: '8px 16px' }}>
-          <h2 style={{ fontSize: '13px', fontWeight: 'bold', margin: '0', textTransform: 'uppercase' }}>
-            Deducciones
-          </h2>
-        </div>
-        <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
-          <tbody>
-            <tr style={{ borderBottom: '2px solid #991b1b' }}>
-              <td style={{ padding: '10px 16px', color: '#737373', fontStyle: 'italic' }}>Sin deducciones</td>
-              <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: '600' }}>
-                {formatCurrency(0)}
-              </td>
-            </tr>
-            <tr style={{ backgroundColor: '#fef2f2' }}>
-              <td style={{ padding: '10px 16px', fontWeight: 'bold' }}>Total Deducciones</td>
-              <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 'bold', fontSize: '13px' }}>
-                {formatCurrency(salary.totalDeducciones)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* Neto a Pagar */}
-      <div style={{
-        border: '2px solid #92400e',
-        borderRadius: '4px',
-        padding: '16px',
-        marginBottom: '40px',
-        backgroundColor: '#fffbeb',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-      }}>
-        <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#92400e' }}>NETO A PAGAR</span>
-        <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#92400e' }}>
-          {formatCurrency(salary.netoAPagar)}
+      {/* Línea de corte */}
+      <div style={{ borderTop: '2px dashed #999', margin: '0 12mm', position: 'relative', height: '25mm', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ backgroundColor: '#fff', padding: '0 12px', fontSize: '9px', color: '#999', letterSpacing: '3px' }}>
+          ✂ CORTAR AQUÍ
         </span>
       </div>
 
-      {/* Firmas */}
-      <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '60px' }}>
-        <div style={{ textAlign: 'center', width: '200px' }}>
-          <div style={{ borderTop: '1px solid #1a1a1a', paddingTop: '8px', fontSize: '11px' }}>
-            Firma del Colaborador
-          </div>
-        </div>
-        <div style={{ textAlign: 'center', width: '200px' }}>
-          <div style={{ borderTop: '1px solid #1a1a1a', paddingTop: '8px', fontSize: '11px' }}>
-            Firma de la Empresa
-          </div>
-        </div>
-      </div>
+      <ReciboSection {...commonProps} copyLabel="Copia Colaborador" />
     </div>
   );
 };

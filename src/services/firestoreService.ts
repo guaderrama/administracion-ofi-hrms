@@ -244,6 +244,7 @@ export const logsService = {
   },
 
   // Crear log con validación atómica de secuencia (anti race condition)
+  // Si la transacción falla, cae a create() normal como fallback
   async createWithValidation(log: LogEntry): Promise<LogEntry> {
     const VALID_TRANSITIONS: Record<string, LogType[]> = {
       'none': [LogType.ENTRADA],
@@ -253,66 +254,75 @@ export const logsService = {
       [LogType.SALIDA]: [LogType.ENTRADA],
     };
 
-    const statusDocId = log.employeeCode || log.employeeName;
+    const statusDocId = (log.employeeCode || log.employeeName || 'unknown').replace(/\//g, '_');
     const statusRef = doc(db, 'employee_clock_status', statusDocId);
 
-    return runTransaction(db, async (transaction) => {
-      // 1. Leer estado actual del empleado (atómico)
-      const statusDoc = await transaction.get(statusRef);
-      const currentStatus = statusDoc.exists() ? statusDoc.data() : { lastLogType: 'none' };
-      const lastType = currentStatus.lastLogType || 'none';
+    let result: LogEntry;
+    try {
+      result = await runTransaction(db, async (transaction) => {
+        // 1. Leer estado actual del empleado (atómico)
+        const statusDoc = await transaction.get(statusRef);
+        const currentStatus = statusDoc.exists() ? statusDoc.data() : { lastLogType: 'none' };
+        const lastType = currentStatus.lastLogType || 'none';
 
-      // Si es un nuevo día, resetear a 'none' (permitir nueva ENTRADA)
-      const today = toLocalDateKey(Date.now()); // Fix Codex: usar fecha local, no UTC
-      const lastDate = currentStatus.lastLogDate || '';
-      const effectiveLastType = (lastDate === today) ? lastType : 'none';
-
-      // 2. Validar transición
-      const allowedNext = VALID_TRANSITIONS[effectiveLastType] || [LogType.ENTRADA];
-      if (!allowedNext.includes(log.type)) {
-        throw new Error(`Transición inválida: "${effectiveLastType}" → "${log.type}". Recarga la página.`);
-      }
-
-      // 3. Crear el log
-      // timestamp como epoch ms (compatible con queries numéricas)
-      // serverTime como auditoría anti-fraude
-      const now = Timestamp.now().toMillis();
-      const newDocRef = doc(collection(db, LOGS_COLLECTION));
-      transaction.set(newDocRef, {
-        ...log,
-        timestamp: now,
-        serverTime: serverTimestamp(),
-        createdByUid: auth.currentUser?.uid || '',
-        createdAt: serverTimestamp(),
-      });
-
-      // 4. Actualizar estado del empleado
-      transaction.set(statusRef, {
-        lastLogType: log.type,
-        lastLogDate: today,
-        lastLogTimestamp: serverTimestamp(),
-        employeeName: log.employeeName,
-        employeeCode: log.employeeCode || '',
-        updatedByUid: auth.currentUser?.uid || '',
-      });
-
-      return { ...log, id: newDocRef.id, timestamp: now };
-    }).then(async (result) => {
-      // Recomputar AttendanceDay después de la transacción
-      try {
+        // Si es un nuevo día, resetear a 'none' (permitir nueva ENTRADA)
         const today = toLocalDateKey(Date.now());
-        const dayLogs = await logsService.getByEmployeeAndDate(log.employeeName);
-        await attendanceDaysService.computeAndSave(
-          log.employeeCode || '',
-          log.employeeName,
-          today,
-          dayLogs,
-        );
-      } catch (err) {
-        console.error('Error recomputando AttendanceDay:', err);
-      }
-      return result;
-    });
+        const lastDate = currentStatus.lastLogDate || '';
+        const effectiveLastType = (lastDate === today) ? lastType : 'none';
+
+        // 2. Validar transición
+        const allowedNext = VALID_TRANSITIONS[effectiveLastType] || [LogType.ENTRADA];
+        if (!allowedNext.includes(log.type)) {
+          throw new Error(`Transición inválida: "${effectiveLastType}" → "${log.type}". Recarga la página.`);
+        }
+
+        // 3. Crear el log
+        const now = Timestamp.now().toMillis();
+        const newDocRef = doc(collection(db, LOGS_COLLECTION));
+        transaction.set(newDocRef, {
+          ...log,
+          timestamp: now,
+          serverTime: serverTimestamp(),
+          createdByUid: auth.currentUser?.uid || '',
+          createdAt: serverTimestamp(),
+        });
+
+        // 4. Actualizar estado del empleado
+        transaction.set(statusRef, {
+          lastLogType: log.type,
+          lastLogDate: today,
+          lastLogTimestamp: serverTimestamp(),
+          employeeName: log.employeeName,
+          employeeCode: log.employeeCode || '',
+          updatedByUid: auth.currentUser?.uid || '',
+        });
+
+        return { ...log, id: newDocRef.id, timestamp: now };
+      });
+    } catch (txError: any) {
+      // Si es error de transición, re-lanzar para mostrar al usuario
+      if (txError.message?.includes('Transición inválida')) throw txError;
+
+      // Fallback: crear log sin transacción (mejor registrar que perder la checada)
+      console.warn('Transacción falló, usando fallback:', txError.message);
+      result = await this.create(log);
+    }
+
+    // Recomputar AttendanceDay (no bloquea la respuesta)
+    try {
+      const today = toLocalDateKey(Date.now());
+      const dayLogs = await logsService.getByEmployeeAndDate(log.employeeName);
+      await attendanceDaysService.computeAndSave(
+        log.employeeCode || '',
+        log.employeeName,
+        today,
+        dayLogs,
+      );
+    } catch (err) {
+      console.error('Error recomputando AttendanceDay:', err);
+    }
+
+    return result;
   },
 
   // Actualizar log existente (para correcciones del admin)

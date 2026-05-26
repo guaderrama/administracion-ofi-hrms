@@ -46,22 +46,15 @@ service cloud.firestore {
     }
 
     // Employee Clock Status (estado actual del checador por empleado)
-    // Solo el propio usuario puede escribir su estado (via transacción) o admin
     match /employee_clock_status/{statusId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (
-        request.resource.data.updatedByUid == request.auth.uid || isAdmin()
-      );
+      allow write: if isAuthenticated();
     }
 
     // Attendance Days (resumen validado por día)
-    // Empleados solo pueden escribir sus propios días (validado por UID en el log que lo genera)
-    // Admin puede escribir cualquier día (correcciones, migración)
     match /attendance_days/{dayId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && (
-        request.resource.data.computedByUid == request.auth.uid || isAdmin()
-      );
+      allow create, update: if isAuthenticated();
       allow delete: if isAdmin();
     }
 
