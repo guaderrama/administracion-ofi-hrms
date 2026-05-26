@@ -18,7 +18,7 @@ import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 export const ChecadorPage: React.FC = () => {
-    const { user, userData, isAdmin } = useAuth();
+    const { user, userData, isAdmin, isSupervisor } = useAuth();
     const toast = useToast();
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
     const [authenticatedEmployee, setAuthenticatedEmployee] = useState<Employee | null>(null);
@@ -108,8 +108,8 @@ export const ChecadorPage: React.FC = () => {
     // Filtrar empleados según el usuario autenticado
     // Admin ve todos, empleado solo ve su propio nombre
     const filteredEmployees = useMemo(() => {
-        // Si es admin, mostrar todos los empleados
-        if (isAdmin) {
+        // Admin y Supervisor ven todos los empleados
+        if (isAdmin || isSupervisor) {
             return syncedEmployees;
         }
 
@@ -155,7 +155,7 @@ export const ChecadorPage: React.FC = () => {
 
         // Si no se encuentra el empleado por email, retornar lista vacía
         return [];
-    }, [user, isAdmin, syncedEmployees, detailedEmployees]);
+    }, [user, isAdmin, isSupervisor, syncedEmployees, detailedEmployees]);
 
     const loadDailyLogs = useCallback(async (employee: Employee) => {
         try {

@@ -16,6 +16,34 @@ import {
   formatMXN,
 } from '../utils/commissionUtils';
 
+const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+function formatDateShort(dateStr: string): string {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${parseInt(d)} ${MESES[parseInt(m) - 1]} ${y}`;
+}
+
+function generateReportName(sales: SaleGroup[]): string {
+  const valid = sales.filter(s => !s.isExcluded);
+  if (valid.length === 0) return 'Reporte vacío';
+
+  const dates = valid.map(s => s.date).sort();
+  const firstDate = dates[0];
+  const lastDate = dates[dates.length - 1];
+
+  const hasJueves = valid.some(s => s.dayOfWeek === 4);
+  const hasSemana = valid.some(s => s.dayOfWeek !== 4);
+
+  if (hasJueves && !hasSemana) {
+    return `Caminata ${formatDateShort(firstDate)}`;
+  }
+  if (hasSemana && !hasJueves) {
+    return `Semana ${formatDateShort(firstDate)} a ${formatDateShort(lastDate)}`;
+  }
+  return `Comisiones ${formatDateShort(firstDate)} a ${formatDateShort(lastDate)}`;
+}
+
 interface ComisionesPageProps {
   setView: (view: string) => void;
 }
@@ -64,7 +92,7 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     if (sales.length === 0) return;
     setIsSaving(true);
     try {
-      const name = reportName || `Comisiones ${fileName || new Date().toLocaleDateString('es-MX')}`;
+      const name = reportName || generateReportName(sales);
       if (currentReportId) {
         await commissionsService.update(currentReportId, { name, settings, sales, presentMap, fileName, status: 'active' });
         toast.success('Reporte actualizado.');
@@ -130,22 +158,41 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     setActiveTab('upload');
   };
 
+  // Recolectar folios ya guardados en reportes existentes (para deduplicar)
+  const existingReceiptNums = useMemo(() => {
+    const nums = new Set<string>();
+    savedReports.forEach(report => {
+      // No incluir el reporte actual (si está cargado) para no excluirse a sí mismo
+      if (report.id === currentReportId) return;
+      (report.sales || []).forEach((sale: any) => {
+        if (!sale.isExcluded) nums.add(sale.receiptNum);
+      });
+    });
+    return nums;
+  }, [savedReports, currentReportId]);
+
   // Parsear CSV
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
+    setCurrentReportId(null); // Nuevo reporte
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
       if (!text) { toast.error('No se pudo leer el archivo.'); return; }
-      const parsed = parseSalesFromCSV(text, employees);
+      const parsed = parseSalesFromCSV(text, employees, existingReceiptNums);
       if (parsed.length === 0) {
         toast.warning('No se encontraron ventas en el archivo.');
         return;
       }
+      const excluded = parsed.filter(s => s.isExcluded);
+      const duplicates = excluded.filter(s => s.excludeReason?.includes('otro reporte'));
       setSales(parsed);
-      toast.success(`${parsed.length} ventas importadas. ${parsed.filter(s => s.isExcluded).length} excluidas.`);
+      setReportName(generateReportName(parsed));
+      let msg = `${parsed.length} ventas importadas. ${excluded.length} excluidas.`;
+      if (duplicates.length > 0) msg += ` ${duplicates.length} ya registradas en otros reportes.`;
+      toast.success(msg);
       setActiveTab('jueves');
     };
     reader.readAsText(file, 'UTF-8');
@@ -178,15 +225,29 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
 
   // Desglose de líneas por categoría (para verificación)
   const juevesLinesByCategory = useMemo(() => {
-    const lines: { folio: string; details: string; totalUSD: number; baseMXN: number; category: string; paymentMethod: string }[] = [];
+    const lines: { folio: string; details: string; totalUSD: number; tc: number; mxn: number; iva: number; comBancaria: number; neto: number; category: string; paymentMethod: string }[] = [];
     juevesVentas.forEach(sale => {
       sale.lines.forEach(line => {
-        const baseMXN = getCommissionableBase(line.total, sale.paymentMethod, settings);
+        const usd = line.total;
+        const tc = settings.exchangeRate;
+        const mxn = usd * tc;
+        const upper = (sale.paymentMethod || '').toUpperCase();
+        const isTarjeta = upper.includes('CREDIT CARD MNX') || upper.includes('CREDIT CARD MXN') || upper.includes('TARJETA') || upper.includes('AMERICAN EXPRESS MNX');
+        // IVA siempre aplica (cash, tarjeta, transfer)
+        const iva = mxn - (mxn / (1 + settings.ivaPercent / 100));
+        const mxnSinIva = mxn - iva;
+        // Comisión bancaria solo en tarjetas
+        const comBancaria = isTarjeta ? mxnSinIva - (mxnSinIva / (1 + settings.bankFeePercent / 100)) : 0;
+        const neto = mxn - iva - comBancaria;
         lines.push({
           folio: sale.receiptNum,
           details: line.details,
-          totalUSD: line.total,
-          baseMXN,
+          totalUSD: usd,
+          tc,
+          mxn,
+          iva,
+          comBancaria,
+          neto,
           category: line.category,
           paymentMethod: sale.paymentMethod,
         });
@@ -194,6 +255,33 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     });
     return lines;
   }, [juevesVentas, settings]);
+
+  const semanaLinesByCategory = useMemo(() => {
+    const lines: { folio: string; details: string; totalUSD: number; tc: number; mxn: number; iva: number; comBancaria: number; neto: number; category: string; paymentMethod: string; user: string }[] = [];
+    semanaVentas.forEach(sale => {
+      sale.lines.forEach(line => {
+        const usd = line.total;
+        const tc = settings.exchangeRate;
+        const mxn = usd * tc;
+        const upper = (sale.paymentMethod || '').toUpperCase();
+        const isTarjeta = upper.includes('CREDIT CARD MNX') || upper.includes('CREDIT CARD MXN') || upper.includes('TARJETA') || upper.includes('AMERICAN EXPRESS MNX');
+        const iva = mxn - (mxn / (1 + settings.ivaPercent / 100));
+        const mxnSinIva = mxn - iva;
+        const comBancaria = isTarjeta ? mxnSinIva - (mxnSinIva / (1 + settings.bankFeePercent / 100)) : 0;
+        const neto = mxn - iva - comBancaria;
+        lines.push({
+          folio: sale.receiptNum,
+          details: line.details,
+          totalUSD: usd,
+          tc, mxn, iva, comBancaria, neto,
+          category: line.category,
+          paymentMethod: sale.paymentMethod,
+          user: sale.user,
+        });
+      });
+    });
+    return lines;
+  }, [semanaVentas, settings]);
 
   const handleSettingChange = (key: keyof CommissionSettings, value: string) => {
     setSettings(prev => ({ ...prev, [key]: parseFloat(value) || 0 }));
@@ -421,31 +509,43 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
             return (
               <Card key={cat}>
                 <h3 className={`text-sm font-bold text-${catColor}-700 mb-2`}>Desglose {catLabel} ({catLines.length} líneas)</h3>
-                <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200">
+                <div className="max-h-64 overflow-auto rounded-lg border border-slate-200">
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50 sticky top-0">
                       <tr>
-                        <th className="py-2 px-3 text-left">Folio</th>
-                        <th className="py-2 px-3 text-left">Detalle</th>
-                        <th className="py-2 px-3 text-left">Pago</th>
-                        <th className="py-2 px-3 text-right">USD</th>
-                        <th className="py-2 px-3 text-right">Base MXN</th>
+                        <th className="py-2 px-2 text-left">Folio</th>
+                        <th className="py-2 px-2 text-left">Detalle</th>
+                        <th className="py-2 px-2 text-left">Pago</th>
+                        <th className="py-2 px-2 text-right">USD</th>
+                        <th className="py-2 px-2 text-right">T.C.</th>
+                        <th className="py-2 px-2 text-right">MXN</th>
+                        <th className="py-2 px-2 text-right">IVA</th>
+                        <th className="py-2 px-2 text-right">Com. Banc.</th>
+                        <th className="py-2 px-2 text-right font-bold">Neto</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {catLines.map((line, i) => (
                         <tr key={`${line.folio}-${i}`}>
-                          <td className="py-1.5 px-3 font-mono">{line.folio}</td>
-                          <td className="py-1.5 px-3 max-w-xs truncate">{line.details}</td>
-                          <td className="py-1.5 px-3">{line.paymentMethod}</td>
-                          <td className="py-1.5 px-3 text-right">${line.totalUSD.toFixed(2)}</td>
-                          <td className="py-1.5 px-3 text-right font-semibold">{formatMXN(line.baseMXN)}</td>
+                          <td className="py-1.5 px-2 font-mono">{line.folio}</td>
+                          <td className="py-1.5 px-2 max-w-[200px] truncate">{line.details}</td>
+                          <td className="py-1.5 px-2 text-xs">{line.paymentMethod}</td>
+                          <td className="py-1.5 px-2 text-right">${line.totalUSD.toFixed(2)}</td>
+                          <td className="py-1.5 px-2 text-right text-slate-500">{line.tc.toFixed(2)}</td>
+                          <td className="py-1.5 px-2 text-right">{formatMXN(line.mxn)}</td>
+                          <td className="py-1.5 px-2 text-right text-red-600">{line.iva > 0 ? `-${formatMXN(line.iva)}` : '—'}</td>
+                          <td className="py-1.5 px-2 text-right text-red-600">{line.comBancaria > 0 ? `-${formatMXN(line.comBancaria)}` : '—'}</td>
+                          <td className="py-1.5 px-2 text-right font-semibold">{formatMXN(line.neto)}</td>
                         </tr>
                       ))}
-                      <tr className="bg-slate-50 font-bold">
-                        <td colSpan={3} className="py-2 px-3">Total {catLabel}</td>
-                        <td className="py-2 px-3 text-right">${catLines.reduce((s, l) => s + l.totalUSD, 0).toFixed(2)}</td>
-                        <td className="py-2 px-3 text-right">{formatMXN(catLines.reduce((s, l) => s + l.baseMXN, 0))}</td>
+                      <tr className="bg-slate-50 font-bold border-t-2 border-slate-300">
+                        <td colSpan={3} className="py-2 px-2">Total {catLabel}</td>
+                        <td className="py-2 px-2 text-right">${catLines.reduce((s, l) => s + l.totalUSD, 0).toFixed(2)}</td>
+                        <td className="py-2 px-2"></td>
+                        <td className="py-2 px-2 text-right">{formatMXN(catLines.reduce((s, l) => s + l.mxn, 0))}</td>
+                        <td className="py-2 px-2 text-right text-red-600">-{formatMXN(catLines.reduce((s, l) => s + l.iva, 0))}</td>
+                        <td className="py-2 px-2 text-right text-red-600">-{formatMXN(catLines.reduce((s, l) => s + l.comBancaria, 0))}</td>
+                        <td className="py-2 px-2 text-right">{formatMXN(catLines.reduce((s, l) => s + l.neto, 0))}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -532,6 +632,62 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
             </div>
           </Card>
 
+          {/* Desglose por categoría — Semana */}
+          {(['joyeria', 'souvenirs', 'originales'] as const).map(cat => {
+            const catLines = semanaLinesByCategory.filter(l => l.category === cat);
+            if (catLines.length === 0) return null;
+            const catLabel = cat === 'joyeria' ? 'Joyería' : cat === 'souvenirs' ? 'Souvenirs' : 'Originales';
+            const catColor = cat === 'joyeria' ? 'blue' : cat === 'souvenirs' ? 'green' : 'purple';
+            return (
+              <Card key={cat}>
+                <h3 className={`text-sm font-bold text-${catColor}-700 mb-2`}>Desglose {catLabel} ({catLines.length} líneas)</h3>
+                <div className="max-h-64 overflow-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr>
+                        <th className="py-2 px-2 text-left">Folio</th>
+                        <th className="py-2 px-2 text-left">Detalle</th>
+                        <th className="py-2 px-2 text-left">Vendedor</th>
+                        <th className="py-2 px-2 text-left">Pago</th>
+                        <th className="py-2 px-2 text-right">USD</th>
+                        <th className="py-2 px-2 text-right">T.C.</th>
+                        <th className="py-2 px-2 text-right">MXN</th>
+                        <th className="py-2 px-2 text-right">IVA</th>
+                        <th className="py-2 px-2 text-right">Com. Banc.</th>
+                        <th className="py-2 px-2 text-right font-bold">Neto</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {catLines.map((line, i) => (
+                        <tr key={`${line.folio}-${i}`}>
+                          <td className="py-1.5 px-2 font-mono">{line.folio}</td>
+                          <td className="py-1.5 px-2 max-w-[200px] truncate">{line.details}</td>
+                          <td className="py-1.5 px-2">{line.user}</td>
+                          <td className="py-1.5 px-2 text-xs">{line.paymentMethod}</td>
+                          <td className="py-1.5 px-2 text-right">${line.totalUSD.toFixed(2)}</td>
+                          <td className="py-1.5 px-2 text-right text-slate-500">{line.tc.toFixed(2)}</td>
+                          <td className="py-1.5 px-2 text-right">{formatMXN(line.mxn)}</td>
+                          <td className="py-1.5 px-2 text-right text-red-600">{line.iva > 0 ? `-${formatMXN(line.iva)}` : '—'}</td>
+                          <td className="py-1.5 px-2 text-right text-red-600">{line.comBancaria > 0 ? `-${formatMXN(line.comBancaria)}` : '—'}</td>
+                          <td className="py-1.5 px-2 text-right font-semibold">{formatMXN(line.neto)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-slate-50 font-bold border-t-2 border-slate-300">
+                        <td colSpan={4} className="py-2 px-2">Total {catLabel}</td>
+                        <td className="py-2 px-2 text-right">${catLines.reduce((s, l) => s + l.totalUSD, 0).toFixed(2)}</td>
+                        <td className="py-2 px-2"></td>
+                        <td className="py-2 px-2 text-right">{formatMXN(catLines.reduce((s, l) => s + l.mxn, 0))}</td>
+                        <td className="py-2 px-2 text-right text-red-600">-{formatMXN(catLines.reduce((s, l) => s + l.iva, 0))}</td>
+                        <td className="py-2 px-2 text-right text-red-600">-{formatMXN(catLines.reduce((s, l) => s + l.comBancaria, 0))}</td>
+                        <td className="py-2 px-2 text-right">{formatMXN(catLines.reduce((s, l) => s + l.neto, 0))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            );
+          })}
+
           {/* Distribución por vendedor */}
           <Card>
             <h3 className="text-lg font-bold text-slate-800 mb-4">Comisión por Vendedor</h3>
@@ -581,18 +737,32 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
 // Sub-componentes
 // ============================================
 
-const SettingInput: React.FC<{ label: string; value: number; onChange: (v: string) => void }> = ({ label, value, onChange }) => (
-  <div>
-    <label className="block text-xs font-medium text-slate-500">{label}</label>
-    <input
-      type="number"
-      step="0.01"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      className="mt-0.5 w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md bg-white focus:ring-2 focus:ring-amber-400 focus:border-transparent"
-    />
-  </div>
-);
+const SettingInput: React.FC<{ label: string; value: number; onChange: (v: string) => void }> = ({ label, value, onChange }) => {
+  const [localValue, setLocalValue] = React.useState(String(value));
+  React.useEffect(() => { setLocalValue(String(value)); }, [value]);
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-500">{label}</label>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={localValue}
+        onChange={e => {
+          const v = e.target.value;
+          if (v === '' || /^[0-9]*\.?[0-9]*$/.test(v)) {
+            setLocalValue(v);
+          }
+        }}
+        onBlur={() => {
+          const num = parseFloat(localValue) || 0;
+          setLocalValue(String(num));
+          onChange(String(num));
+        }}
+        className="mt-0.5 w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md bg-white focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+      />
+    </div>
+  );
+};
 
 const StatCard: React.FC<{ label: string; value: number; color?: string }> = ({ label, value, color = 'slate' }) => (
   <div className={`p-3 rounded-lg bg-${color}-50 border border-${color}-200 text-center`}>

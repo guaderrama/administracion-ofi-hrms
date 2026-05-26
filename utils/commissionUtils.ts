@@ -83,7 +83,8 @@ export function parseCSV(csvText: string): string[][] {
 
 export function parseSalesFromCSV(
   csvText: string,
-  employees: DetailedEmployee[]
+  employees: DetailedEmployee[],
+  existingReceiptNums?: Set<string>,
 ): SaleGroup[] {
   const rows = parseCSV(csvText);
   if (rows.length < 2) return [];
@@ -121,12 +122,15 @@ export function parseSalesFromCSV(
     const details = (saleRow[13] || '').trim(); // columna N
 
     // Determinar exclusión
-    const isVoided = status.toUpperCase() === 'VOIDED';
+    const statusUpper = status.toUpperCase();
+    const isNotClosed = statusUpper !== 'CLOSED' && statusUpper !== '';
     const isZeroSale = totalAmount === 0 && paidAmount === 0;
     const isEmpSale = isEmployeeSale(customerCode, customerName, employees);
-    const isExcluded = isVoided || isZeroSale || isEmpSale;
+    const isDuplicate = existingReceiptNums ? existingReceiptNums.has(receiptNum) : false;
+    const isExcluded = isNotClosed || isZeroSale || isEmpSale || isDuplicate;
     let excludeReason: string | undefined;
-    if (isVoided) excludeReason = 'Venta anulada (VOIDED)';
+    if (isDuplicate) excludeReason = 'Ya registrada en otro reporte';
+    else if (isNotClosed) excludeReason = `Status: ${status || 'vacío'} (solo CLOSED)`;
     else if (isZeroSale) excludeReason = 'Cortesía ($0)';
     else if (isEmpSale) excludeReason = 'Venta a colaborador';
 
@@ -196,7 +200,8 @@ export const DEFAULT_SETTINGS: CommissionSettings = {
 /**
  * Calcula la base comisionable:
  * 1. SIEMPRE convierte USD → MXN (todas las ventas del POS están en USD)
- * 2. Si el pago fue con tarjeta MXN: descuenta IVA y comisión bancaria
+ * 2. SIEMPRE descuenta IVA (todas las transacciones generan IVA)
+ * 3. Solo tarjetas: descuenta comisión bancaria
  */
 export function getCommissionableBase(
   amount: number,
@@ -206,13 +211,15 @@ export function getCommissionableBase(
   // Paso 1: Convertir a MXN (el CSV siempre está en USD)
   let mxn = amount * settings.exchangeRate;
 
-  // Paso 2: Si es pago con tarjeta MXN, descontar IVA y comisión bancaria
-  const upper = (paymentMethod || '').toUpperCase();
-  const isCreditCardMXN = upper.includes('CREDIT CARD MNX') || upper.includes('CREDIT CARD MXN') || upper.includes('TARJETA') || upper.includes('AMERICAN EXPRESS MNX');
+  // Paso 2: SIEMPRE quitar IVA (cash, tarjeta, transfer, todos generan IVA)
+  mxn = mxn / (1 + settings.ivaPercent / 100); // / 1.16
 
-  if (isCreditCardMXN) {
-    mxn = mxn / (1 + settings.ivaPercent / 100); // quitar IVA: / 1.16
-    mxn = mxn / (1 + settings.bankFeePercent / 100); // quitar com. bancaria: / 1.04
+  // Paso 3: Solo tarjetas: quitar comisión bancaria
+  const upper = (paymentMethod || '').toUpperCase();
+  const isTarjeta = upper.includes('CREDIT CARD MNX') || upper.includes('CREDIT CARD MXN') || upper.includes('TARJETA') || upper.includes('AMERICAN EXPRESS MNX');
+
+  if (isTarjeta) {
+    mxn = mxn / (1 + settings.bankFeePercent / 100); // / 1.04
   }
 
   return mxn;
@@ -318,18 +325,22 @@ export function distributeSemanaCommission(
 
   return employees.map(emp => {
     const empName = `${emp.paterno} ${emp.materno} ${emp.nombres}`;
-    // Buscar ventas de este empleado por nombre o código
-    const empUpper = empName.toUpperCase();
-    const empNombres = emp.nombres.toUpperCase();
+    // Buscar ventas de este empleado — el CSV puede tener nombre corto ("Fatima", "Iluvia")
+    const empNombres = emp.nombres.toUpperCase().split(' ');
     const empPaterno = emp.paterno.toUpperCase();
 
     let userSales: SaleGroup[] = [];
-    Object.entries(byUser).forEach(([user, sales]) => {
-      const userUpper = user.toUpperCase();
-      if (userUpper.includes(empPaterno) && userUpper.includes(empNombres)) {
-        userSales = [...userSales, ...sales];
-      } else if (userUpper === empUpper) {
-        userSales = [...userSales, ...sales];
+    Object.entries(byUser).forEach(([user, userGroupSales]) => {
+      const userUpper = user.toUpperCase().trim();
+      // Match exacto por nombre completo
+      if (userUpper === empName.toUpperCase()) {
+        userSales = [...userSales, ...userGroupSales];
+      // Match por apellido paterno
+      } else if (userUpper.includes(empPaterno)) {
+        userSales = [...userSales, ...userGroupSales];
+      // Match por primer nombre (ej: "Fatima" matchea con "CESEÑA OLIVAS FATIMA GUADALUPE")
+      } else if (empNombres.some(n => n.length >= 3 && userUpper.includes(n))) {
+        userSales = [...userSales, ...userGroupSales];
       }
     });
 

@@ -1552,9 +1552,55 @@ export interface SavedCommissionReport {
 }
 
 export const commissionsService = {
+  // Comprime ventas para no exceder el límite de 1MB de Firestore
+  _compressSales(sales: any[]): any[] {
+    return sales.map(sale => ({
+      r: sale.receiptNum,
+      d: sale.date,
+      w: sale.dayOfWeek,
+      cn: (sale.customerName || '').slice(0, 30),
+      u: (sale.user || '').slice(0, 20),
+      t: sale.totalAmount,
+      pm: (sale.paymentMethod || '').slice(0, 25),
+      ex: sale.isExcluded || false,
+      ...(sale.excludeReason ? { er: sale.excludeReason } : {}),
+      l: (sale.lines || []).map((ln: any) => ({
+        t: ln.total,
+        d: (ln.details || '').slice(0, 50),
+        c: ln.category,
+      })),
+    }));
+  },
+
+  _decompressSales(compressed: any[]): any[] {
+    return compressed.map(s => ({
+      receiptNum: s.r,
+      date: s.d,
+      dayOfWeek: s.w,
+      customerCode: '',
+      customerName: s.cn || '',
+      user: s.u || '',
+      totalAmount: s.t,
+      paidAmount: s.t,
+      paymentMethod: s.pm || '',
+      status: '',
+      isExcluded: s.ex || false,
+      excludeReason: s.er || '',
+      lines: (s.l || []).map((ln: any) => ({
+        receiptNum: s.r, date: s.d, dayOfWeek: s.w,
+        customerCode: '', customerName: s.cn || '',
+        user: s.u || '', status: '', paymentMethod: s.pm || '',
+        total: ln.t, details: ln.d || '', category: ln.c,
+        quantity: 1, subtotal: ln.t, discount: 0, paid: 0,
+        register: '', sku: '', isExcluded: s.ex || false,
+      })),
+    }));
+  },
+
   async save(report: Omit<SavedCommissionReport, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
     const docRef = await addDoc(collection(db, COMMISSIONS_COLLECTION), {
       ...report,
+      sales: this._compressSales(report.sales),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -1563,6 +1609,9 @@ export const commissionsService = {
 
   async update(id: string, data: Partial<SavedCommissionReport>): Promise<void> {
     const { id: _, ...updateData } = data as any;
+    if (updateData.sales) {
+      updateData.sales = this._compressSales(updateData.sales);
+    }
     await updateDoc(doc(db, COMMISSIONS_COLLECTION, id), {
       ...updateData,
       updatedAt: serverTimestamp(),
@@ -1576,24 +1625,32 @@ export const commissionsService = {
   async getAll(): Promise<SavedCommissionReport[]> {
     const q = query(collection(db, COMMISSIONS_COLLECTION), orderBy('createdAt', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({
-      ...d.data(),
-      id: d.id,
-      createdAt: d.data().createdAt?.toDate?.() || new Date(),
-      updatedAt: d.data().updatedAt?.toDate?.() || new Date(),
-    })) as SavedCommissionReport[];
+    return snapshot.docs.map(d => {
+      const data = d.data();
+      return {
+        ...data,
+        id: d.id,
+        sales: this._decompressSales(data.sales || []),
+        createdAt: data.createdAt?.toDate?.() || new Date(),
+        updatedAt: data.updatedAt?.toDate?.() || new Date(),
+      };
+    }) as SavedCommissionReport[];
   },
 
   subscribe(callback: (reports: SavedCommissionReport[]) => void): () => void {
     return onSnapshot(
       query(collection(db, COMMISSIONS_COLLECTION), orderBy('createdAt', 'desc')),
       (snapshot) => {
-        const reports = snapshot.docs.map(d => ({
-          ...d.data(),
-          id: d.id,
-          createdAt: d.data().createdAt?.toDate?.() || new Date(),
-          updatedAt: d.data().updatedAt?.toDate?.() || new Date(),
-        })) as SavedCommissionReport[];
+        const reports = snapshot.docs.map(d => {
+          const data = d.data();
+          return {
+            ...data,
+            id: d.id,
+            sales: this._decompressSales(data.sales || []),
+            createdAt: data.createdAt?.toDate?.() || new Date(),
+            updatedAt: data.updatedAt?.toDate?.() || new Date(),
+          };
+        }) as SavedCommissionReport[];
         callback(reports);
       }
     );
