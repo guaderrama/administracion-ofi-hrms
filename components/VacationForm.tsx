@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { VacationRequest, DetailedEmployee } from '../types';
 import { calculateVacationDays } from '../utils/vacationCalculator';
-import { employeesService } from '../src/services/firestoreService';
+import { employeesService, vacationRequestsService } from '../src/services/firestoreService';
+import { useAuth } from '../src/contexts/AuthContext';
 import { useToast } from './ui/Toast';
 
 interface VacationFormProps {
@@ -27,9 +28,64 @@ const InputField: React.FC<{ label: string; id: string; type?: string; value: st
 ));
 
 
+// Dias de descanso obligatorio segun la Ley Federal del Trabajo (Mexico)
+// Incluye dias fijos + dias que cambian por decreto (lunes mas cercano)
+function getOfficialHolidays(year: number): string[] {
+  const holidays: string[] = [];
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const fmt = (m: number, d: number) => `${year}-${pad(m)}-${pad(d)}`;
+
+  // 1 enero - Año Nuevo
+  holidays.push(fmt(1, 1));
+  // Primer lunes de febrero - Dia de la Constitucion
+  const feb1 = new Date(year, 1, 1);
+  const firstMonFeb = 1 + ((8 - feb1.getDay()) % 7);
+  holidays.push(fmt(2, firstMonFeb));
+  // Tercer lunes de marzo - Natalicio de Benito Juarez
+  const mar1 = new Date(year, 2, 1);
+  const firstMonMar = 1 + ((8 - mar1.getDay()) % 7);
+  holidays.push(fmt(3, firstMonMar + 14));
+  // 1 mayo - Dia del Trabajo
+  holidays.push(fmt(5, 1));
+  // 16 septiembre - Dia de la Independencia
+  holidays.push(fmt(9, 16));
+  // Tercer lunes de noviembre - Revolucion Mexicana
+  const nov1 = new Date(year, 10, 1);
+  const firstMonNov = 1 + ((8 - nov1.getDay()) % 7);
+  holidays.push(fmt(11, firstMonNov + 14));
+  // 25 diciembre - Navidad
+  holidays.push(fmt(12, 25));
+  // 1 octubre cada 6 anos - Transmision del Poder Ejecutivo (2024, 2030...)
+  if (year % 6 === 0 || (year - 2024) % 6 === 0) {
+    holidays.push(fmt(10, 1));
+  }
+
+  return holidays;
+}
+
+function getHolidayName(dateStr: string): string | null {
+  const md = dateStr.slice(5); // MM-DD
+  const year = parseInt(dateStr.slice(0, 4));
+  const holidays = getOfficialHolidays(year);
+  if (!holidays.includes(dateStr)) return null;
+
+  if (md === '01-01') return 'Ano Nuevo';
+  if (md.startsWith('02-')) return 'Dia de la Constitucion';
+  if (md.startsWith('03-')) return 'Natalicio de Benito Juarez';
+  if (md === '05-01') return 'Dia del Trabajo';
+  if (md === '09-16') return 'Dia de la Independencia';
+  if (md.startsWith('11-')) return 'Revolucion Mexicana';
+  if (md === '12-25') return 'Navidad';
+  if (md === '10-01') return 'Transmision del Poder Ejecutivo';
+  return 'Dia Feriado Oficial';
+}
+
 export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerating }) => {
   const toast = useToast();
+  const { user } = useAuth();
   const today = new Date().toISOString().split('T')[0];
+  const [usedDays, setUsedDays] = useState(0);
+  const [savingRequest, setSavingRequest] = useState(false);
   const [formData, setFormData] = useState<VacationRequest>({
     firstName: '',
     lastName: '',
@@ -84,6 +140,8 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
         motherLastName: found.materno,
         hireDate: found.fechaIngreso,
       }));
+      // Cargar dias ya usados
+      vacationRequestsService.getUsedDaysByEmployee(code.trim()).then(days => setUsedDays(days));
     } else {
       setCodeStatus('not_found');
     }
@@ -91,14 +149,15 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
 
   useEffect(() => {
     const entitledDays = calculateVacationDays(formData.hireDate, formData.requestDate);
+    const availableDays = entitledDays - usedDays;
     const requestedDays = formData.dates.length;
     setFormData(prev => ({
       ...prev,
-      vacationDaysEntitled: entitledDays,
+      vacationDaysEntitled: availableDays,
       daysRequested: requestedDays,
-      daysRemaining: entitledDays - requestedDays
+      daysRemaining: availableDays - requestedDays
     }));
-  }, [formData.hireDate, formData.requestDate, formData.dates]);
+  }, [formData.hireDate, formData.requestDate, formData.dates, usedDays]);
 
   const updateDates = useCallback((newDates: string[]) => {
     setFormData(prev => ({
@@ -110,12 +169,17 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
   const handleAddDate = useCallback(() => {
     if (dateToAdd && !formData.dates.includes(dateToAdd)) {
         const selectedDate = new Date(dateToAdd + 'T12:00:00');
-        if (selectedDate.getDay() === 0) { // 0 is Sunday
-          toast.warning('El domingo es día de descanso y no puede ser seleccionado como día de vacaciones.');
+        if (selectedDate.getDay() === 0) {
+          toast.warning('El domingo es dia de descanso y no puede ser seleccionado.');
           return;
         }
-        if (excludeSaturdays && selectedDate.getDay() === 6) { // 6 is Saturday
-          toast.warning('El sábado ha sido marcado como día de descanso y no puede ser seleccionado.');
+        if (excludeSaturdays && selectedDate.getDay() === 6) {
+          toast.warning('El sabado ha sido marcado como dia de descanso.');
+          return;
+        }
+        const holidayName = getHolidayName(dateToAdd);
+        if (holidayName) {
+          toast.warning(`${dateToAdd.slice(5)} es "${holidayName}" (dia feriado oficial). No cuenta como dia de vacaciones.`);
           return;
         }
         const newDates = [...formData.dates, dateToAdd].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
@@ -136,16 +200,32 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
     }
 
     const newDatesInRange = [];
+    const skippedHolidays: string[] = [];
     const currentDate = new Date(start);
+    // Obtener feriados para todos los anos del rango
+    const yearsInRange = new Set<number>();
+    const cursor2 = new Date(start);
+    while (cursor2 <= end) { yearsInRange.add(cursor2.getFullYear()); cursor2.setDate(cursor2.getDate() + 1); }
+    const allHolidays = new Set<string>();
+    yearsInRange.forEach(y => getOfficialHolidays(y).forEach(h => allHolidays.add(h)));
 
     while (currentDate <= end) {
       const dayOfWeek = currentDate.getDay();
+      const dateStr = currentDate.toISOString().slice(0, 10);
       const isWeekendToExclude = dayOfWeek === 0 || (excludeSaturdays && dayOfWeek === 6);
+      const isHoliday = allHolidays.has(dateStr);
 
-      if (!isWeekendToExclude) {
-        newDatesInRange.push(currentDate.toISOString().slice(0, 10));
+      if (isHoliday) {
+        skippedHolidays.push(dateStr);
+      } else if (!isWeekendToExclude) {
+        newDatesInRange.push(dateStr);
       }
       currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    if (skippedHolidays.length > 0) {
+      const names = skippedHolidays.map(d => `${getHolidayName(d)} (${new Date(d + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })})`).join(', ');
+      toast.info(`Se excluyeron ${skippedHolidays.length} dia(s) feriado(s): ${names}`);
     }
     
     const allDates = [...new Set([...formData.dates, ...newDatesInRange])].sort(
@@ -167,13 +247,44 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
     setFormData(prev => ({ ...prev, [name]: value }));
   }, []);
   
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if(formData.daysRequested > formData.vacationDaysEntitled){
-      toast.error('Has seleccionado más días de los que te corresponden. Por favor, ajusta las fechas.');
+      toast.error('Has seleccionado mas dias de los que te corresponden. Por favor, ajusta las fechas.');
       return;
     }
-    onSubmit(formData);
+    if (formData.dates.length === 0) {
+      toast.warning('Selecciona al menos un dia de vacaciones.');
+      return;
+    }
+
+    setSavingRequest(true);
+    try {
+      // Buscar empleado para obtener ID
+      const emp = employees.find(e => e.codigo === employeeCode.trim());
+      await vacationRequestsService.create({
+        employeeId: emp?.id || '',
+        employeeCode: employeeCode.trim(),
+        employeeName: `${formData.firstName} ${formData.lastName} ${formData.motherLastName}`.trim(),
+        hireDate: formData.hireDate,
+        dates: formData.dates,
+        daysRequested: formData.daysRequested,
+        daysEntitled: formData.vacationDaysEntitled,
+        notes: formData.additionalNotes || '',
+        status: 'pendiente',
+        createdBy: user?.email || '',
+        createdAt: new Date(),
+      });
+      // Actualizar dias usados localmente
+      setUsedDays(prev => prev + formData.daysRequested);
+      toast.success(`Solicitud de ${formData.daysRequested} dias de vacaciones registrada.`);
+      onSubmit(formData);
+    } catch (err) {
+      console.error('Error al guardar solicitud:', err);
+      toast.error('Error al guardar la solicitud.');
+    } finally {
+      setSavingRequest(false);
+    }
   };
   
   return (
@@ -217,21 +328,28 @@ export const VacationForm: React.FC<VacationFormProps> = ({ onSubmit, isGenerati
       
       <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 space-y-4">
         <h3 className="text-lg leading-6 font-medium text-slate-800">Cálculo de Días de Vacaciones</h3>
-        <div className="grid grid-cols-3 gap-4 p-4 bg-black/5 rounded-lg border border-slate-300/50">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-black/5 rounded-lg border border-slate-300/50">
           <div className="text-center">
-            <p className="text-sm font-medium text-slate-600">Días Correspondientes</p>
+            <p className="text-sm font-medium text-slate-600">Dias por Ley</p>
+            <p className="text-2xl font-bold text-slate-500">{calculateVacationDays(formData.hireDate, formData.requestDate)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium text-slate-600">Dias Usados</p>
+            <p className="text-2xl font-bold text-orange-600">{usedDays}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium text-slate-600">Disponibles</p>
             <p className="text-2xl font-bold text-amber-700">{formData.vacationDaysEntitled}</p>
           </div>
           <div className="text-center">
-            <p className="text-sm font-medium text-slate-600">Días Solicitados</p>
-            <p className="text-2xl font-bold text-slate-800">{formData.daysRequested}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-sm font-medium text-slate-600">Días Pendientes</p>
-            <p className={`text-2xl font-bold ${formData.daysRemaining < 0 ? 'text-red-600' : 'text-slate-800'}`}>{formData.daysRemaining}</p>
+            <p className="text-sm font-medium text-slate-600">Restantes</p>
+            <p className={`text-2xl font-bold ${formData.daysRemaining < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formData.daysRemaining}</p>
           </div>
         </div>
-        {formData.daysRemaining < 0 && <p className="text-sm text-red-600 font-medium text-center">Advertencia: Estás solicitando más días de los que te corresponden.</p>}
+        {usedDays > 0 && (
+          <p className="text-xs text-slate-500 text-center">Ya has utilizado {usedDays} dia{usedDays !== 1 ? 's' : ''} de vacaciones este periodo.</p>
+        )}
+        {formData.daysRemaining < 0 && <p className="text-sm text-red-600 font-medium text-center">Advertencia: Estas solicitando mas dias de los que te corresponden.</p>}
       </div>
 
       <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20 space-y-4">

@@ -270,7 +270,7 @@ export const ChecadorPage: React.FC = () => {
                 console.error("Error obteniendo la geolocalización:", error);
                 saveLog(type);
             },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
     };
 
@@ -280,20 +280,35 @@ export const ChecadorPage: React.FC = () => {
             return;
         }
 
-        const newLog: LogEntry = {
-            employeeName: authenticatedEmployee.name,
-            type,
-            timestamp: Date.now(),
-            location,
-        };
-
         try {
-            await logsService.create(newLog);
+            // Buscar codigo del empleado para matching robusto
+            const matchedEmp = detailedEmployees.find(emp => {
+                const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
+                return authenticatedEmployee.name.toUpperCase().trim() === fullName ||
+                    (authenticatedEmployee.name.toUpperCase().includes(emp.paterno.toUpperCase()) &&
+                     authenticatedEmployee.name.toUpperCase().includes(emp.nombres.toUpperCase()));
+            });
+
+            const newLog: LogEntry = {
+                employeeName: authenticatedEmployee.name,
+                employeeCode: matchedEmp?.codigo || '',
+                type,
+                timestamp: 0, // serverTimestamp() se aplica en la transacción
+                location,
+            };
+
+            // Transacción atómica: valida secuencia + crea log + actualiza estado
+            await logsService.createWithValidation(newLog);
             await loadDailyLogs(authenticatedEmployee);
             toast.success(`${logTypeLabels[type] || type} registrado correctamente.`);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error al guardar registro:', error);
-            toast.error('Error al guardar registro. Intenta de nuevo.');
+            if (error.message?.includes('Transición inválida')) {
+                toast.warning(error.message);
+                await loadDailyLogs(authenticatedEmployee);
+            } else {
+                toast.error('Error al guardar registro. Intenta de nuevo.');
+            }
         } finally {
             setIsProcessingLog(false);
         }

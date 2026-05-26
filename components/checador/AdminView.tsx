@@ -9,7 +9,7 @@ import { DownloadIcon } from './icons/DownloadIcon';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMethodsForEmail } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../../src/firebaseConfig';
-import { employeesService, logsService, permissionsService, cleanDuplicateLogs, tardinessService, motivationalService, toleranceService, type TardinessAdjustment, type MotivationalSettings, type ToleranceSettings } from '../../src/services/firestoreService';
+import { employeesService, logsService, permissionsService, cleanDuplicateLogs, tardinessService, motivationalService, toleranceService, vacationRequestsService, type TardinessAdjustment, type MotivationalSettings, type ToleranceSettings, type VacationRequestRecord } from '../../src/services/firestoreService';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../src/contexts/AuthContext';
 
@@ -185,6 +185,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   const [newEmployee, setNewEmployee] = useState(initialFormState);
   const [isEmployeeSectionVisible, setIsEmployeeSectionVisible] = useState(false);
 
+  // Vacaciones
+  const [vacationRequests, setVacationRequests] = useState<VacationRequestRecord[]>([]);
+  const [editingVacation, setEditingVacation] = useState<VacationRequestRecord | null>(null);
+  const [editVacDates, setEditVacDates] = useState('');
+  const [isVacationSectionVisible, setIsVacationSectionVisible] = useState(false);
+
   // Estado para edición de colaboradores
   const [editingEmployee, setEditingEmployee] = useState<DetailedEmployee | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -267,6 +273,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
       setTempTolerance(settings.minutes);
     });
 
+    const unsubscribeVacations = vacationRequestsService.subscribe((reqs) => {
+      setVacationRequests(reqs);
+    });
+
     // Cleanup: desuscribirse cuando el componente se desmonte
     return () => {
       unsubscribeLogs();
@@ -275,6 +285,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
       unsubscribeTardiness();
       unsubscribeMotivational();
       unsubscribeTolerance();
+      unsubscribeVacations();
     };
   }, []);
 
@@ -1374,28 +1385,67 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                                 {/* Acciones */}
                                 {(isAdmin || isSupervisor) && (
                                   <td className="py-3 px-4 whitespace-nowrap text-sm text-center">
-                                    {(canSupervisorAct || canAdminAct) ? (
-                                      <div className="flex gap-1 justify-center">
-                                        <button
-                                          onClick={() => handlePermissionDecision(req.id, 'aprobado')}
-                                          className="px-2 py-1 text-xs font-medium rounded bg-green-500 text-white hover:bg-green-600 transition-colors"
-                                          title="Aprobar"
-                                        >
-                                          Aprobar
-                                        </button>
-                                        <button
-                                          onClick={() => handlePermissionDecision(req.id, 'denegado')}
-                                          className="px-2 py-1 text-xs font-medium rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
-                                          title="Denegar"
-                                        >
-                                          Denegar
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <span className="text-xs text-slate-400">
-                                        {isFinal ? 'Finalizado' : 'Sin accion'}
-                                      </span>
-                                    )}
+                                    <div className="flex gap-1 justify-center items-center">
+                                      {(canSupervisorAct || canAdminAct) && (
+                                        <>
+                                          <button
+                                            onClick={() => handlePermissionDecision(req.id, 'aprobado')}
+                                            className="px-2 py-1 text-xs font-medium rounded bg-green-500 text-white hover:bg-green-600 transition-colors"
+                                            title="Aprobar"
+                                          >
+                                            Aprobar
+                                          </button>
+                                          <button
+                                            onClick={() => handlePermissionDecision(req.id, 'denegado')}
+                                            className="px-2 py-1 text-xs font-medium rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+                                            title="Denegar"
+                                          >
+                                            Denegar
+                                          </button>
+                                        </>
+                                      )}
+                                      {!canSupervisorAct && !canAdminAct && (
+                                        <span className="text-xs text-slate-400 mr-1">
+                                          {isFinal ? 'Finalizado' : ''}
+                                        </span>
+                                      )}
+                                      {canEdit && (
+                                        <>
+                                          <button
+                                            onClick={() => {
+                                              const newStatus = prompt('Cambiar estado a:\n1 = Pendiente\n2 = Aprobado\n3 = Denegado\n\nIngresa 1, 2 o 3:');
+                                              if (!newStatus) return;
+                                              const statusMap: Record<string, string> = { '1': 'Pendiente', '2': 'Aprobado', '3': 'Denegado por Admin' };
+                                              const newVal = statusMap[newStatus];
+                                              if (newVal) {
+                                                permissionsService.update(req.id, {
+                                                  status: newVal,
+                                                  ...(newStatus === '2' ? { supervisorApproval: { status: 'aprobado', by: user?.email || '', date: new Date().toISOString() }, adminApproval: { status: 'aprobado', by: user?.email || '', date: new Date().toISOString() } } : {}),
+                                                  ...(newStatus === '3' ? { supervisorApproval: { status: 'denegado', by: user?.email || '', date: new Date().toISOString(), comment: 'Editado por admin' }, adminApproval: { status: 'denegado', by: user?.email || '', date: new Date().toISOString() } } : {}),
+                                                });
+                                                toast.success(`Estado cambiado a "${newVal}".`);
+                                              }
+                                            }}
+                                            className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                                            title="Editar estado"
+                                          >
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              if (confirm(`Eliminar solicitud de ${req.firstName} ${req.lastName}?`)) {
+                                                permissionsService.delete(req.id);
+                                                toast.success('Solicitud eliminada.');
+                                              }
+                                            }}
+                                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                            title="Eliminar solicitud"
+                                          >
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
                                   </td>
                                 )}
                             </tr>
@@ -1435,6 +1485,127 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                     Este es un cálculo automático basado en las solicitudes de permiso con "Reposición con tiempo de trabajo adicional".
                 </p>
             </div>
+        </div>
+
+        {/* Gestion de Vacaciones */}
+        <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
+          <button
+            onClick={() => setIsVacationSectionVisible(!isVacationSectionVisible)}
+            className="w-full flex justify-between items-center text-left"
+          >
+            <h2 className="text-xl font-bold text-slate-800">
+              Solicitudes de Vacaciones
+              <span className="ml-2 text-sm font-normal text-slate-500">({vacationRequests.length})</span>
+            </h2>
+            <ChevronDownIcon className={`transition-transform duration-300 ${isVacationSectionVisible ? 'rotate-180' : ''}`} />
+          </button>
+
+          {isVacationSectionVisible && (
+            <div className="mt-4 border-t pt-4 border-slate-300/50">
+              {vacationRequests.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-4">No hay solicitudes de vacaciones.</p>
+              ) : (
+                <div className="overflow-x-auto max-h-[500px]">
+                  <table className="min-w-full bg-white/60 rounded-lg shadow text-sm">
+                    <thead className="bg-white/80 sticky top-0">
+                      <tr>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-600 uppercase">Colaborador</th>
+                        <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase">Dias</th>
+                        <th className="py-3 px-3 text-left text-xs font-semibold text-slate-600 uppercase">Fechas</th>
+                        <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase">Estado</th>
+                        <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase">Registrado</th>
+                        {canEdit && <th className="py-3 px-3 text-center text-xs font-semibold text-slate-600 uppercase">Acciones</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {vacationRequests.map(vr => (
+                        <tr key={vr.id} className="hover:bg-slate-100/50">
+                          <td className="py-3 px-3">
+                            <p className="font-medium text-slate-800">{vr.employeeName}</p>
+                            <p className="text-xs text-slate-400">Cod: {vr.employeeCode}</p>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span className="font-bold text-amber-800">{vr.daysRequested}</span>
+                            <span className="text-xs text-slate-400 ml-1">de {vr.daysEntitled}</span>
+                          </td>
+                          <td className="py-3 px-3">
+                            {editingVacation?.id === vr.id ? (
+                              <textarea
+                                value={editVacDates}
+                                onChange={e => setEditVacDates(e.target.value)}
+                                rows={2}
+                                className="w-full px-2 py-1 border border-amber-300 rounded text-xs font-mono focus:ring-2 focus:ring-amber-500 outline-none"
+                                placeholder="YYYY-MM-DD, uno por linea"
+                              />
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                {vr.dates.slice(0, 5).map(d => (
+                                  <span key={d} className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-mono">
+                                    {new Date(d + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+                                  </span>
+                                ))}
+                                {vr.dates.length > 5 && <span className="text-[10px] text-slate-400">+{vr.dates.length - 5} mas</span>}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                              vr.status === 'aprobada' ? 'bg-green-100 text-green-800' :
+                              vr.status === 'rechazada' ? 'bg-red-100 text-red-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>{vr.status}</span>
+                          </td>
+                          <td className="py-3 px-3 text-center text-xs text-slate-500">
+                            {new Date(vr.createdAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+                          </td>
+                          {canEdit && (
+                            <td className="py-3 px-3 text-center">
+                              {editingVacation?.id === vr.id ? (
+                                <div className="flex gap-1 justify-center">
+                                  <button
+                                    onClick={async () => {
+                                      const newDates = editVacDates.split('\n').map(d => d.trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+                                      if (newDates.length === 0) { toast.warning('Ingresa fechas validas (YYYY-MM-DD)'); return; }
+                                      await vacationRequestsService.update(vr.id!, { dates: newDates, daysRequested: newDates.length });
+                                      setEditingVacation(null);
+                                      toast.success('Fechas actualizadas.');
+                                    }}
+                                    className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
+                                  >Guardar</button>
+                                  <button onClick={() => setEditingVacation(null)} className="px-2 py-1 text-xs bg-slate-300 text-slate-700 rounded hover:bg-slate-400">Cancelar</button>
+                                </div>
+                              ) : (
+                                <div className="flex gap-1 justify-center">
+                                  {vr.status === 'pendiente' && (
+                                    <>
+                                      <button onClick={() => { vacationRequestsService.update(vr.id!, { status: 'aprobada' }); toast.success('Vacacion aprobada.'); }} className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600">Aprobar</button>
+                                      <button onClick={() => { vacationRequestsService.update(vr.id!, { status: 'rechazada' }); toast.success('Vacacion rechazada.'); }} className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600">Rechazar</button>
+                                    </>
+                                  )}
+                                  <button
+                                    onClick={() => { setEditingVacation(vr); setEditVacDates(vr.dates.join('\n')); }}
+                                    className="p-1 text-slate-400 hover:text-amber-600 rounded" title="Editar fechas"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>
+                                  </button>
+                                  <button
+                                    onClick={async () => { await vacationRequestsService.remove(vr.id!); toast.success('Solicitud eliminada. Dias restablecidos.'); }}
+                                    className="p-1 text-slate-400 hover:text-red-600 rounded" title="Eliminar (restablece dias)"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Gestion de Retardos */}

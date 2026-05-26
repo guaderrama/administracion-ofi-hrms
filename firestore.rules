@@ -38,8 +38,31 @@ service cloud.firestore {
     // Attendance Logs collection (registros de asistencia)
     match /attendance_logs/{logId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      // Solo el propio usuario puede crear logs (createdByUid debe coincidir) o admin
+      allow create: if isAuthenticated() && (
+        request.resource.data.createdByUid == request.auth.uid || isAdmin()
+      );
       allow update, delete: if isAdmin();
+    }
+
+    // Employee Clock Status (estado actual del checador por empleado)
+    // Solo el propio usuario puede escribir su estado (via transacción) o admin
+    match /employee_clock_status/{statusId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (
+        request.resource.data.updatedByUid == request.auth.uid || isAdmin()
+      );
+    }
+
+    // Attendance Days (resumen validado por día)
+    // Empleados solo pueden escribir sus propios días (validado por UID en el log que lo genera)
+    // Admin puede escribir cualquier día (correcciones, migración)
+    match /attendance_days/{dayId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && (
+        request.resource.data.computedByUid == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAdmin();
     }
 
     // Permission Requests collection (solicitudes de permisos)
@@ -109,6 +132,31 @@ service cloud.firestore {
     match /payroll_cuts/{docId} {
       allow read: if isAuthenticated();
       allow create, delete: if isAdmin();
+    }
+
+    // Vacation Requests (solicitudes de vacaciones)
+    match /vacation_requests/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // Internal Policies (politicas internas)
+    match /internal_policies/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Policy Acknowledgments (aceptacion de politicas)
+    match /policy_acknowledgments/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
+
+    // Important Dates / Calendar (fechas importantes)
+    match /important_dates/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdminOrSupervisor();
     }
   }
 }

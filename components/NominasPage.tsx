@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
-import { employeesService, logsService, payrollCutsService, type PayrollCut } from '../src/services/firestoreService';
+import { employeesService, logsService, attendanceDaysService, payrollCutsService, type PayrollCut } from '../src/services/firestoreService';
 import { NominasPdfPreview } from './NominasPdfPreview';
 import {
   PayrollPeriod,
@@ -51,6 +51,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
 
   const diasEnPeriodo = getDaysInQuincena(selectedPeriod);
   const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
 
   // Calcular días trabajados desde registros de asistencia
   useEffect(() => {
@@ -59,65 +60,107 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     const fetchAttendance = async () => {
       setLoadingAttendance(true);
       try {
+        // Cargar ambas fuentes: AttendanceDay (validada) y logs crudos (fallback)
+        const attendanceDays = await attendanceDaysService.getByDateRange(
+          selectedPeriod.startDate,
+          selectedPeriod.endDate
+        );
+
         const startDate = new Date(selectedPeriod.startDate + 'T00:00:00');
         const endDate = new Date(selectedPeriod.endDate + 'T23:59:59');
         const logs = await logsService.getByDateRange(startDate, endDate);
 
-        // Filtrar solo entradas
-        const entradas = logs.filter((log: LogEntry) => log.type === LogType.ENTRADA);
-
-        // Calcular días de descanso en el periodo (domingos + sábados según horario)
+        // Calcular días de descanso en el periodo
         const sundaysInPeriod: string[] = [];
         const saturdaysInPeriod: string[] = [];
         const cursor = new Date(selectedPeriod.startDate + 'T00:00:00');
         const endLimit = new Date(selectedPeriod.endDate + 'T00:00:00');
         while (cursor <= endLimit) {
           const key = `${cursor.getFullYear()}-${cursor.getMonth()}-${cursor.getDate()}`;
-          if (cursor.getDay() === 0) sundaysInPeriod.push(key);   // Domingo
-          if (cursor.getDay() === 6) saturdaysInPeriod.push(key); // Sábado
+          if (cursor.getDay() === 0) sundaysInPeriod.push(key);
+          if (cursor.getDay() === 6) saturdaysInPeriod.push(key);
           cursor.setDate(cursor.getDate() + 1);
         }
 
-        // Contar días únicos con entrada por empleado + días de descanso pagados
         const updated: Record<string, number> = {};
+
+        // Fallback POR DÍA POR EMPLEADO: para cada día del periodo,
+        // usar AttendanceDay si existe, si no calcular desde logs crudos
         employees.forEach((emp) => {
           const empFullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
 
-          // Buscar logs que coincidan con este empleado
-          const empEntradas = entradas.filter((log: LogEntry) => {
+          // AttendanceDays de este empleado indexados por fecha
+          const empDays = attendanceDays.filter(day =>
+            day.employeeCode === emp.codigo ||
+            day.employeeName.toUpperCase().trim() === empFullName
+          );
+          const daysByDate = new Map(empDays.map(d => [d.date, d]));
+
+          // Logs crudos de este empleado agrupados por día
+          const empLogs = logs.filter((log: LogEntry) => {
+            if (log.employeeCode && emp.codigo && log.employeeCode === emp.codigo) return true;
             const logName = log.employeeName.toUpperCase().trim();
             return logName === empFullName ||
               (logName.includes(emp.paterno.toUpperCase()) &&
                logName.includes(emp.nombres.toUpperCase()));
           });
+          const logsByDay: Record<string, LogEntry[]> = {};
+          empLogs.forEach((log: LogEntry) => {
+            const d = new Date(log.timestamp);
+            const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            if (!logsByDay[dayKey]) logsByDay[dayKey] = [];
+            logsByDay[dayKey].push(log);
+          });
 
-          // Días únicos con entrada
-          const workedDays = new Set(
-            empEntradas.map((log: LogEntry) => {
-              const d = new Date(log.timestamp);
-              return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-            })
-          );
+          // Recorrer cada día del periodo
+          const workedDays = new Set<string>();
+          const dayCursor = new Date(selectedPeriod.startDate + 'T12:00:00');
+          const dayEnd = new Date(selectedPeriod.endDate + 'T12:00:00');
+          while (dayCursor <= dayEnd) {
+            const dateStr = `${dayCursor.getFullYear()}-${String(dayCursor.getMonth() + 1).padStart(2, '0')}-${String(dayCursor.getDate()).padStart(2, '0')}`;
+            const dayOfWeek = dayCursor.getDay();
+            const dayKeyUnpadded = `${dayCursor.getFullYear()}-${dayCursor.getMonth()}-${dayCursor.getDate()}`;
 
-          // Domingos siempre se pagan como descanso
-          sundaysInPeriod.forEach((d) => workedDays.add(d));
+            if (dayOfWeek === 0) {
+              // Domingo: siempre pagado como descanso
+              workedDays.add(dayKeyUnpadded);
+            } else if (dayOfWeek === 6 && emp.horarioSabado?.toLowerCase().includes('no labora')) {
+              // Sábado no laborable: pagado como descanso
+              workedDays.add(dayKeyUnpadded);
+            } else {
+              // Día laborable: verificar asistencia
+              const attendanceDay = daysByDate.get(dateStr);
+              if (attendanceDay) {
+                // Tiene AttendanceDay → usar fuente validada
+                if (attendanceDay.payableDay) {
+                  workedDays.add(dayKeyUnpadded);
+                }
+              } else if (logsByDay[dateStr]) {
+                // Sin AttendanceDay pero tiene logs → fallback ENTRADA+SALIDA
+                const dayLogs = logsByDay[dateStr];
+                const hasEntrada = dayLogs.some(l => l.type === LogType.ENTRADA);
+                const hasSalida = dayLogs.some(l => l.type === LogType.SALIDA);
+                if (hasEntrada && hasSalida) {
+                  workedDays.add(dayKeyUnpadded);
+                }
+              }
+              // Si no tiene ni AttendanceDay ni logs → no cuenta (0)
+            }
 
-          // Sábados se pagan si el empleado no labora ese día
-          const noLaboraSabado = emp.horarioSabado?.toLowerCase().includes('no labora');
-          if (noLaboraSabado) {
-            saturdaysInPeriod.forEach((d) => workedDays.add(d));
+            dayCursor.setDate(dayCursor.getDate() + 1);
           }
 
           updated[emp.id] = Math.min(workedDays.size, diasEnPeriodo);
         });
 
         setDaysWorked(updated);
+        setAttendanceError(null);
       } catch (error) {
         console.error('Error cargando asistencia:', error);
-        // Fallback: poner todos los días del periodo
         const fallback: Record<string, number> = {};
-        employees.forEach((emp) => { fallback[emp.id] = diasEnPeriodo; });
+        employees.forEach((emp) => { fallback[emp.id] = 0; });
         setDaysWorked(fallback);
+        setAttendanceError('Error al cargar asistencia. Los días trabajados se muestran como 0. Recarga la página.');
       } finally {
         setLoadingAttendance(false);
       }
@@ -378,6 +421,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             Colaboradores ({employees.length})
             {loadingAttendance && <span className="ml-2 text-sm font-normal text-amber-600">Cargando asistencia...</span>}
           </h2>
+          {attendanceError && (
+            <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+              <strong>Error:</strong> {attendanceError}
+            </div>
+          )}
           {canEdit && (
             <button
               onClick={handleGenerateAll}
@@ -495,7 +543,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             <div className="flex gap-2">
               <button
                 onClick={handleSaveCut}
-                disabled={savingCut || employees.length === 0}
+                disabled={savingCut || employees.length === 0 || !!attendanceError || loadingAttendance}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-600 to-green-600 text-white rounded-lg text-sm font-medium hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 transition-all"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

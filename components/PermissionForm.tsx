@@ -47,11 +47,50 @@ const SelectField: React.FC<{ label: string; id: string; value: string; onChange
 ));
 
 
+// Parsear horario "HH:MM-HH:MM" a minutos de trabajo (restando 1h de comida si >= 7h)
+function parseScheduleToWorkMinutes(schedule: string | undefined): number | null {
+  if (!schedule || schedule.toLowerCase().includes('no labora')) return 0;
+  const parts = schedule.split('-').map(s => s.trim());
+  if (parts.length < 2) return null;
+  const [sh, sm] = parts[0].split(':').map(Number);
+  const [eh, em] = parts[1].split(':').map(Number);
+  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return null;
+  let totalMin = (eh * 60 + em) - (sh * 60 + sm);
+  // Si trabaja 7+ horas, restar 1h de comida
+  if (totalMin >= 420) totalMin -= 60;
+  return Math.max(totalMin, 0);
+}
+
+// Obtener horario y hora de entrada/salida del empleado para un dia especifico
+function getScheduleForDate(emp: DetailedEmployee, dateStr: string): { schedule: string; startMin: number; endMin: number; workMin: number } {
+  const d = new Date(dateStr + 'T12:00:00');
+  const day = d.getDay(); // 0=dom, 1=lun...6=sab
+
+  let schedule = emp.horarioLunesMiercolesViernes || '09:00-18:00';
+  if (day === 4) schedule = emp.horarioJueves || schedule; // jueves
+  if (day === 6) schedule = emp.horarioSabado || schedule; // sabado
+  if (day === 0) return { schedule: 'No labora', startMin: 0, endMin: 0, workMin: 0 }; // domingo
+
+  if (schedule.toLowerCase().includes('no labora')) {
+    return { schedule, startMin: 0, endMin: 0, workMin: 0 };
+  }
+
+  const parts = schedule.split('-').map(s => s.trim());
+  const [sh, sm] = (parts[0] || '09:00').split(':').map(Number);
+  const [eh, em] = (parts[1] || '18:00').split(':').map(Number);
+  const startMin = (sh || 9) * 60 + (sm || 0);
+  const endMin = (eh || 18) * 60 + (em || 0);
+  let workMin = endMin - startMin;
+  if (workMin >= 420) workMin -= 60; // restar comida
+  return { schedule, startMin, endMin, workMin: Math.max(workMin, 0) };
+}
+
 export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGenerating }) => {
   const toast = useToast();
   const [employeeCode, setEmployeeCode] = useState('');
   const [codeError, setCodeError] = useState('');
   const [employeeFound, setEmployeeFound] = useState(false);
+  const [foundEmployee, setFoundEmployee] = useState<DetailedEmployee | null>(null);
 
   const [formData, setFormData] = useState<Omit<PermissionRequest, 'id' | 'status'>>({
     firstName: '',
@@ -108,19 +147,21 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
       return;
     }
 
-    const foundEmployee = detailedEmployees.find(emp => emp.codigo === code);
+    const foundEmp = detailedEmployees.find(emp => emp.codigo === code);
 
-    if (foundEmployee) {
+    if (foundEmp) {
       setFormData(prev => ({
         ...prev,
-        firstName: foundEmployee.nombres,
-        lastName: foundEmployee.paterno,
-        motherLastName: foundEmployee.materno,
+        firstName: foundEmp.nombres,
+        lastName: foundEmp.paterno,
+        motherLastName: foundEmp.materno,
       }));
       setEmployeeFound(true);
+      setFoundEmployee(foundEmp);
       setCodeError('');
     } else {
       setCodeError('Código no encontrado. Verifica e intenta de nuevo.');
+      setFoundEmployee(null);
       setFormData(prev => ({
         ...prev,
         firstName: '',
@@ -215,29 +256,48 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
   };
 
   const totalMinutesToCompensate = useMemo(() => {
-    const { permissionType, arrivalTime, departureTime, absenceStartTime, absenceEndTime, daysCount } = formData;
-    
-    const WORKDAY_START_MINUTES = 9 * 60; // 09:00
-    const WORKDAY_END_MINUTES = 18 * 60;   // 18:00
-    const WORKDAY_DURATION_MINUTES = 8 * 60; // 8 hours
+    const { permissionType, arrivalTime, departureTime, absenceStartTime, absenceEndTime, dates, permissionDate } = formData;
+
+    // Fallback si no hay empleado encontrado
+    const defaultStart = 9 * 60;
+    const defaultEnd = 18 * 60;
+    const defaultWork = 8 * 60;
 
     switch (permissionType) {
-        case PermissionType.FULL_DAYS:
-            return (daysCount || 0) * WORKDAY_DURATION_MINUTES;
-        case PermissionType.LATE_ARRIVAL:
+        case PermissionType.FULL_DAYS: {
+            if (foundEmployee && dates && dates.length > 0) {
+                // Calcular horas reales por cada dia seleccionado
+                let totalMin = 0;
+                dates.forEach(dateStr => {
+                    const sched = getScheduleForDate(foundEmployee, dateStr);
+                    totalMin += sched.workMin;
+                });
+                return totalMin;
+            }
+            // Fallback: usar dias x 8h
+            return (dates?.length || 0) * defaultWork;
+        }
+        case PermissionType.LATE_ARRIVAL: {
             const arrival = timeToMinutes(arrivalTime);
-            return arrival > WORKDAY_START_MINUTES ? arrival - WORKDAY_START_MINUTES : 0;
-        case PermissionType.EARLY_DEPARTURE:
+            const dateForCalc = permissionDate || formData.requestDate;
+            const startMin = foundEmployee && dateForCalc ? getScheduleForDate(foundEmployee, dateForCalc).startMin : defaultStart;
+            return arrival > startMin ? arrival - startMin : 0;
+        }
+        case PermissionType.EARLY_DEPARTURE: {
             const departure = timeToMinutes(departureTime);
-            return departure < WORKDAY_END_MINUTES ? WORKDAY_END_MINUTES - departure : 0;
-        case PermissionType.PARTIAL_ABSENCE:
+            const dateForCalc = permissionDate || formData.requestDate;
+            const endMin = foundEmployee && dateForCalc ? getScheduleForDate(foundEmployee, dateForCalc).endMin : defaultEnd;
+            return departure < endMin ? endMin - departure : 0;
+        }
+        case PermissionType.PARTIAL_ABSENCE: {
             const start = timeToMinutes(absenceStartTime);
             const end = timeToMinutes(absenceEndTime);
             return end > start ? end - start : 0;
+        }
         default:
             return 0;
     }
-  }, [formData.permissionType, formData.daysCount, formData.arrivalTime, formData.departureTime, formData.absenceStartTime, formData.absenceEndTime]);
+  }, [formData.permissionType, formData.dates, formData.permissionDate, formData.arrivalTime, formData.departureTime, formData.absenceStartTime, formData.absenceEndTime, formData.requestDate, foundEmployee]);
 
   const formatMinutes = (minutes: number) => {
     if (minutes <= 0) return '0 minutos';
@@ -438,6 +498,30 @@ export const PermissionForm: React.FC<PermissionFormProps> = ({ onSubmit, isGene
                     <p className="text-sm font-medium text-amber-900">Total de tiempo a reponer</p>
                     <p className="text-xl font-bold text-amber-800">{formatMinutes(totalMinutesToCompensate)}</p>
                 </div>
+                {/* Desglose por dia segun horario del empleado */}
+                {foundEmployee && formData.permissionType === PermissionType.FULL_DAYS && formData.dates && formData.dates.length > 0 && (
+                    <div className="p-3 bg-blue-50/60 rounded-lg">
+                        <p className="text-xs font-semibold text-blue-800 mb-1.5">Desglose segun tu horario registrado:</p>
+                        <div className="space-y-1">
+                            {formData.dates.map(dateStr => {
+                                const sched = getScheduleForDate(foundEmployee, dateStr);
+                                const dayName = new Date(dateStr + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' });
+                                return (
+                                    <div key={dateStr} className="flex justify-between items-center text-xs">
+                                        <span className="text-slate-700 capitalize">{dayName}</span>
+                                        <span className="font-mono">
+                                            {sched.workMin > 0 ? (
+                                                <span className="text-blue-800 font-semibold">{sched.schedule} = {formatMinutes(sched.workMin)}</span>
+                                            ) : (
+                                                <span className="text-slate-400">No labora</span>
+                                            )}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <SelectField 

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import type { LogEntry } from '../../types';
 import { LogType } from '../../types';
 import { DownloadIcon } from './icons/DownloadIcon';
+import { toLocalDateKey } from '../../utils/dateUtils';
 
 interface WorkedHoursSummaryProps {
   logs: LogEntry[];
@@ -19,7 +20,7 @@ export const WorkedHoursSummary: React.FC<WorkedHoursSummaryProps> = ({ logs }) 
         const groupedLogs: { [key: string]: LogEntry[] } = {};
 
         logs.forEach(log => {
-            const date = new Date(log.timestamp).toISOString().slice(0, 10);
+            const date = toLocalDateKey(log.timestamp);
             const key = `${log.employeeName}__${date}`;
             if (!groupedLogs[key]) groupedLogs[key] = [];
             groupedLogs[key].push(log);
@@ -29,17 +30,21 @@ export const WorkedHoursSummary: React.FC<WorkedHoursSummaryProps> = ({ logs }) 
             const [employeeName, date] = key.split('__');
             const dailyLogs = groupedLogs[key];
 
-            const checkIn = dailyLogs.find(l => l.type === LogType.ENTRADA);
-            const checkOut = dailyLogs.find(l => l.type === LogType.SALIDA);
+            const sortedLogs = [...dailyLogs].sort((a, b) => a.timestamp - b.timestamp);
+            const checkIn = sortedLogs.find(l => l.type === LogType.ENTRADA); // primera entrada
+            const checkOut = [...sortedLogs].reverse().find(l => l.type === LogType.SALIDA); // ultima salida
             
             if (checkIn && checkOut) {
                 let totalMillis = checkOut.timestamp - checkIn.timestamp;
                 
-                const lunchStart = dailyLogs.find(l => l.type === LogType.INICIO_COMIDA);
-                const lunchEnd = dailyLogs.find(l => l.type === LogType.FIN_COMIDA);
-
-                if (lunchStart && lunchEnd) {
-                    totalMillis -= (lunchEnd.timestamp - lunchStart.timestamp);
+                // Descontar TODAS las pausas de comida (no solo la primera)
+                const lunchStarts = sortedLogs.filter(l => l.type === LogType.INICIO_COMIDA);
+                const lunchEnds = sortedLogs.filter(l => l.type === LogType.FIN_COMIDA);
+                const pairs = Math.min(lunchStarts.length, lunchEnds.length);
+                for (let i = 0; i < pairs; i++) {
+                    if (lunchEnds[i].timestamp > lunchStarts[i].timestamp) {
+                        totalMillis -= (lunchEnds[i].timestamp - lunchStarts[i].timestamp);
+                    }
                 }
 
                 dailySummaries.push({ employeeName, date, workedTime: totalMillis / (1000 * 60) });
@@ -58,22 +63,30 @@ export const WorkedHoursSummary: React.FC<WorkedHoursSummaryProps> = ({ logs }) 
     };
 
     const downloadCSV = () => {
-        let csvContent = "data:text/csv;charset=utf-8,";
-        csvContent += "Colaborador,Fecha,Horas Trabajadas (minutos),Formato\n";
+        const csvRows = ["Colaborador,Fecha,Horas Trabajadas (minutos),Formato"];
 
         summary.forEach(item => {
             const formattedTime = item.workedTime !== null ? `${Math.floor(item.workedTime / 60)}h ${Math.round(item.workedTime % 60)}m` : "Incompleto";
-            const row = [item.employeeName, item.date, item.workedTime ?? 'N/A', formattedTime].join(",");
-            csvContent += row + "\r\n";
+            const row = [
+                `"${item.employeeName.replace(/"/g, '""')}"`,
+                `"${item.date}"`,
+                item.workedTime ?? 'N/A',
+                `"${formattedTime}"`
+            ].join(",");
+            csvRows.push(row);
         });
-        
-        const encodedUri = encodeURI(csvContent);
+
+        const csvString = csvRows.join('\n');
+        const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
         link.setAttribute("download", "resumen_horas_trabajadas.csv");
+        link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     };
 
   return (

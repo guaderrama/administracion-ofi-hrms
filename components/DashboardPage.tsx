@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { DetailedEmployee, PermissionRequest, LogEntry } from '@/types';
 import { LogType } from '@/types';
-import { employeesService, permissionsService, logsService, motivationalService, toleranceService, announcementsService, type Announcement } from '../src/services/firestoreService';
+import { employeesService, permissionsService, logsService, motivationalService, toleranceService, announcementsService, importantDatesService, vacationRequestsService, dashboardLayoutService, policiesService, policyAcksService, type Announcement, type ImportantDate, type VacationRequestRecord, type InternalPolicy, type PolicyAcknowledgment } from '../src/services/firestoreService';
+import { getOfficialHolidays } from '../utils/mexicanHolidays';
 import { useAuth } from '../src/contexts/AuthContext';
 import { calculateVacation } from './nominasUtils';
 import { Card } from './ui/Card';
@@ -111,6 +112,16 @@ export const DashboardPage: React.FC = () => {
         return () => unsubscribe();
     }, []);
 
+    // Fechas importantes desde Firestore
+    const [importantDatesFromDb, setImportantDatesFromDb] = useState<ImportantDate[]>([]);
+    useEffect(() => {
+        const unsubscribe = importantDatesService.subscribe((data) => setImportantDatesFromDb(data));
+        return () => unsubscribe();
+    }, []);
+
+    // State for vacation requests (subscription set up after currentEmployee is defined)
+    const [myVacationRequests, setMyVacationRequests] = useState<VacationRequestRecord[]>([]);
+
     // Filtrar anuncios activos (no expirados)
     const activeAnnouncements = useMemo(() => {
         const today = new Date().toISOString().slice(0, 10);
@@ -149,6 +160,22 @@ export const DashboardPage: React.FC = () => {
 
     // Calcular vacaciones del empleado actual
     const vacationInfo = currentEmployee ? calculateVacation(currentEmployee.fechaIngreso) : null;
+
+    // Suscribirse a solicitudes de vacaciones del empleado actual
+    useEffect(() => {
+        if (!currentEmployee?.codigo) { setMyVacationRequests([]); return; }
+        const unsubscribe = vacationRequestsService.subscribeByEmployee(currentEmployee.codigo, (reqs) => setMyVacationRequests(reqs));
+        return () => unsubscribe();
+    }, [currentEmployee?.codigo]);
+
+    // Dias de vacaciones usados (pendientes + aprobadas)
+    const vacationUsedDays = useMemo(() => {
+        return myVacationRequests
+            .filter(r => r.status !== 'rechazada')
+            .reduce((sum, r) => sum + (r.dates?.length || 0), 0);
+    }, [myVacationRequests]);
+
+    const vacationAvailable = vacationInfo ? vacationInfo.daysEntitled - vacationUsedDays : 0;
 
     // Filtrar solicitudes del empleado actual
     const myRequests = currentEmployee
@@ -302,16 +329,226 @@ export const DashboardPage: React.FC = () => {
         .filter((a): a is NonNullable<typeof a> => a !== null)
         .sort((a, b) => a.day - b.day);
     
-    const importantDates = [
-        { event: "Aniversario de la empresa", date: "20 de Agosto" },
-        { event: "Posada Navideña", date: "15 de Diciembre" },
-    ];
+    // Fechas importantes: combinar DB + fallback si DB está vacía
+    const importantDates = useMemo(() => {
+        if (importantDatesFromDb.length > 0) {
+            // Filtrar próximas o recurrentes, ordenar por fecha
+            const todayStr = new Date().toISOString().slice(0, 10);
+            return importantDatesFromDb
+                .filter(d => d.date >= todayStr || d.recurring)
+                .slice(0, 10)
+                .map(d => ({
+                    event: d.title,
+                    date: new Date(d.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long' }),
+                    endDate: d.endDate && d.endDate !== '' ? new Date(d.endDate + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long' }) : undefined,
+                    category: d.category,
+                    noLabor: d.noLabor ?? false,
+                }));
+        }
+        return [
+            { event: "Aniversario de la empresa", date: "20 de Agosto", endDate: undefined, category: 'empresa' as const, noLabor: false },
+            { event: "Posada Navideña", date: "15 de Diciembre", endDate: undefined, category: 'empresa' as const, noLabor: false },
+        ];
+    }, [importantDatesFromDb]);
 
-    const reminders = [
-        "Revisar inventario de herramientas al final del día.",
-        "Mantener el área de trabajo limpia y ordenada.",
-        "Reportar cualquier incidente de seguridad de inmediato.",
-    ];
+    // Mini calendario para Dashboard
+    const [calMonth, setCalMonth] = useState(new Date().getMonth());
+    const [calYear, setCalYear] = useState(new Date().getFullYear());
+    const MONTHS_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+    const calendarAllEvents = useMemo(() => {
+        const all: { date: string; title: string; color: string; isBirthday?: boolean }[] = [];
+        // DB dates
+        importantDatesFromDb.forEach(d => {
+            const color = d.noLabor ? 'bg-red-200' : d.category === 'vacaciones' ? 'bg-emerald-200' : d.category === 'empresa' ? 'bg-amber-200' : 'bg-blue-200';
+            if (d.endDate && d.endDate !== '') {
+                const cursor = new Date(d.date + 'T12:00:00');
+                const end = new Date(d.endDate + 'T12:00:00');
+                while (cursor <= end) {
+                    all.push({ date: cursor.toISOString().slice(0, 10), title: d.title, color });
+                    cursor.setDate(cursor.getDate() + 1);
+                }
+            } else {
+                all.push({ date: d.date, title: d.title, color });
+                if (d.recurring) {
+                    const mmdd = d.date.slice(5);
+                    all.push({ date: `${calYear}-${mmdd}`, title: d.title, color });
+                }
+            }
+        });
+        // Feriados LFT
+        getOfficialHolidays(calYear).forEach(h => {
+            if (!all.some(a => a.date === h.date)) {
+                all.push({ date: h.date, title: h.name, color: 'bg-red-300' });
+            }
+        });
+        // Cumpleanos
+        employees.forEach(emp => {
+            if (!emp.fechaNacimiento) return;
+            const mmdd = emp.fechaNacimiento.slice(5);
+            all.push({ date: `${calYear}-${mmdd}`, title: `🎂 ${emp.nombres} ${emp.paterno}`, color: 'bg-rose-200', isBirthday: true });
+        });
+        // Aniversarios laborales
+        employees.forEach(emp => {
+            if (!emp.fechaIngreso) return;
+            const hireDate = new Date(emp.fechaIngreso + 'T12:00:00');
+            const years = calYear - hireDate.getFullYear();
+            if (years < 1) return;
+            const mmdd = emp.fechaIngreso.slice(5);
+            all.push({ date: `${calYear}-${mmdd}`, title: `🏆 ${years} año${years > 1 ? 's' : ''} - ${emp.nombres} ${emp.paterno}`, color: 'bg-amber-200' });
+        });
+        return all;
+    }, [importantDatesFromDb, calYear, employees]);
+
+    const calDays = useMemo(() => {
+        const firstDay = new Date(calYear, calMonth, 1);
+        const lastDay = new Date(calYear, calMonth + 1, 0);
+        const pad = firstDay.getDay();
+        const total = lastDay.getDate();
+        const days: { day: number; events: typeof calendarAllEvents }[] = [];
+        for (let i = 0; i < pad; i++) days.push({ day: 0, events: [] });
+        for (let d = 1; d <= total; d++) {
+            const ds = `${calYear}-${(calMonth + 1).toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+            days.push({ day: d, events: calendarAllEvents.filter(e => e.date === ds) });
+        }
+        return days;
+    }, [calendarAllEvents, calYear, calMonth]);
+
+    const todayCalStr = `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getDate().toString().padStart(2, '0')}`;
+
+    // ====== Politicas Internas ======
+    const [policies, setPolicies] = useState<InternalPolicy[]>([]);
+    const [myAcks, setMyAcks] = useState<PolicyAcknowledgment[]>([]);
+    const [viewingPolicy, setViewingPolicy] = useState<InternalPolicy | null>(null);
+    const [showPolicyForm, setShowPolicyForm] = useState(false);
+    const [editingPolicy, setEditingPolicy] = useState<InternalPolicy | null>(null);
+    const [savingPolicy, setSavingPolicy] = useState(false);
+    const policyTitleRef = useRef<HTMLInputElement>(null);
+    const policyCategoryRef = useRef<HTMLSelectElement>(null);
+    const policyContentRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const unsub = policiesService.subscribe((p) => setPolicies(p));
+        return () => unsub();
+    }, []);
+
+    useEffect(() => {
+        if (!user?.email) return;
+        const unsub = policyAcksService.subscribeByEmployee(user.email, (a) => setMyAcks(a));
+        return () => unsub();
+    }, [user?.email]);
+
+    const hasPolicyAck = (policyId: string) => myAcks.some(a => a.policyId === policyId);
+
+    const handleAckPolicy = async (policy: InternalPolicy) => {
+        if (!user?.email || !currentEmployee) return;
+        await policyAcksService.acknowledge({
+            policyId: policy.id!,
+            policyTitle: policy.title,
+            policyVersion: policy.version,
+            employeeEmail: user.email,
+            employeeName: `${currentEmployee.nombres} ${currentEmployee.paterno} ${currentEmployee.materno}`.trim(),
+            acknowledgedAt: new Date(),
+        });
+    };
+
+    const handleSavePolicy = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const title = policyTitleRef.current?.value || '';
+        const category = policyCategoryRef.current?.value || 'general';
+        const content = policyContentRef.current?.innerHTML || '';
+        if (!title.trim() || !content.trim()) return;
+        setSavingPolicy(true);
+        try {
+            if (editingPolicy?.id) {
+                await policiesService.update(editingPolicy.id, {
+                    title, category, content,
+                    version: (editingPolicy.version || 1) + 1,
+                });
+            } else {
+                await policiesService.create({
+                    title, category, content,
+                    version: 1,
+                    active: true,
+                    createdBy: user?.email || '',
+                    createdAt: new Date(),
+                });
+            }
+            setShowPolicyForm(false);
+            setEditingPolicy(null);
+        } finally {
+            setSavingPolicy(false);
+        }
+    };
+
+    const POLICY_CATEGORIES: Record<string, string> = {
+        general: 'Reglamento General',
+        oficinas: 'Oficinas Administrativas',
+        galerias: 'Galerias',
+        seguridad: 'Seguridad',
+        otro: 'Otro',
+    };
+
+    // ====== Drag & Drop Layout (solo admin) ======
+    const DEFAULT_WIDGET_ORDER = ['announcements', 'birthdays', 'anniversaries', 'calendar', 'vacations', 'tardiness', 'solicitudes', 'policies'];
+    const [widgetOrder, setWidgetOrder] = useState<string[]>(DEFAULT_WIDGET_ORDER);
+    const [editingLayout, setEditingLayout] = useState(false);
+    const dragItem = useRef<number | null>(null);
+    const dragOverItem = useRef<number | null>(null);
+
+    useEffect(() => {
+        const unsub = dashboardLayoutService.subscribe((order) => {
+            if (order.length > 0) {
+                // Merge: keep saved order, append any new widgets not in saved order
+                const merged = [...order];
+                DEFAULT_WIDGET_ORDER.forEach(w => { if (!merged.includes(w)) merged.push(w); });
+                setWidgetOrder(merged);
+            }
+        });
+        return () => unsub();
+    }, []);
+
+    const handleDragStart = useCallback((idx: number) => {
+        dragItem.current = idx;
+    }, []);
+
+    const handleDragEnter = useCallback((idx: number) => {
+        dragOverItem.current = idx;
+    }, []);
+
+    const handleDragEnd = useCallback(() => {
+        if (dragItem.current === null || dragOverItem.current === null) return;
+        const newOrder = [...widgetOrder];
+        const draggedItem = newOrder.splice(dragItem.current, 1)[0];
+        newOrder.splice(dragOverItem.current, 0, draggedItem);
+        dragItem.current = null;
+        dragOverItem.current = null;
+        setWidgetOrder(newOrder);
+    }, [widgetOrder]);
+
+    const handleSaveLayout = useCallback(async () => {
+        await dashboardLayoutService.save(widgetOrder);
+        setEditingLayout(false);
+    }, [widgetOrder]);
+
+    // Wrapper para widgets arrastrables
+    const DragWrap: React.FC<{ id: string; idx: number; fullWidth?: boolean; children: React.ReactNode }> = ({ id, idx, fullWidth, children }) => (
+        <div
+            className={`relative ${fullWidth ? 'col-span-1 md:col-span-2' : ''} ${editingLayout ? 'ring-2 ring-dashed ring-amber-300 rounded-2xl' : ''}`}
+            draggable={editingLayout}
+            onDragStart={() => handleDragStart(idx)}
+            onDragEnter={() => handleDragEnter(idx)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => e.preventDefault()}
+        >
+            {editingLayout && (
+                <div className="absolute -top-2 -right-2 z-10 bg-amber-500 text-white rounded-full w-6 h-6 flex items-center justify-center cursor-grab text-xs font-bold shadow" title="Arrastra para mover">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" /></svg>
+                </div>
+            )}
+            {children}
+        </div>
+    );
 
     return (
         <div className="container mx-auto p-4 sm:p-6 lg:p-8 font-sans">
@@ -501,7 +738,33 @@ export const DashboardPage: React.FC = () => {
                 </div>
             )}
 
+            {/* Boton editar layout - solo admin */}
+            {isAdmin && (
+                <div className="flex justify-end mb-2">
+                    {editingLayout ? (
+                        <div className="flex gap-2">
+                            <button onClick={handleSaveLayout} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                Guardar Distribucion
+                            </button>
+                            <button onClick={() => { setWidgetOrder(DEFAULT_WIDGET_ORDER); setEditingLayout(false); }} className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors">
+                                Cancelar
+                            </button>
+                        </div>
+                    ) : (
+                        <button onClick={() => setEditingLayout(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z" /></svg>
+                            Editar Distribucion
+                        </button>
+                    )}
+                </div>
+            )}
+
             <main className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {widgetOrder.map((widgetId, idx) => {
+              // ===== BIRTHDAYS =====
+              if (widgetId === 'birthdays') return (
+                <DragWrap key={widgetId} id={widgetId} idx={idx}>
                 <InfoCard title="Cumpleaños del Mes" icon={<CakeIcon />}>
                     {employees.length === 0 ? (
                         <p className="text-sm text-slate-500">No hay colaboradores registrados.</p>
@@ -511,7 +774,12 @@ export const DashboardPage: React.FC = () => {
                         <p className="text-sm text-slate-500">No hay cumpleaños este mes.</p>
                     )}
                 </InfoCard>
+                </DragWrap>
+              );
 
+              // ===== ANNIVERSARIES =====
+              if (widgetId === 'anniversaries') return (
+                <DragWrap key={widgetId} id={widgetId} idx={idx}>
                 <InfoCard title="Aniversarios Laborales" icon={<AwardIcon />}>
                      {employees.length === 0 ? (
                         <p className="text-sm text-slate-500">No hay colaboradores registrados.</p>
@@ -521,52 +789,230 @@ export const DashboardPage: React.FC = () => {
                         <p className="text-sm text-slate-500">No hay aniversarios este mes.</p>
                     )}
                 </InfoCard>
+                </DragWrap>
+              );
                 
-                <InfoCard title="Fechas Importantes" icon={<CalendarIcon />}>
-                    {importantDates.map(item => (
-                        <div key={item.event} className="flex justify-between items-center text-sm py-1 border-b border-slate-200/50">
-                            <p className="text-slate-700">{item.event}</p>
-                            <p className="font-medium text-slate-900">{item.date}</p>
-                        </div>
-                    ))}
-                </InfoCard>
+              // ===== CALENDAR =====
+              if (widgetId === 'calendar') return (
+                <DragWrap key={widgetId} id={widgetId} idx={idx} fullWidth>
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                        <button onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(calYear - 1); } else setCalMonth(calMonth - 1); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                            <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                        </button>
+                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <CalendarIcon />
+                            {MONTHS_ES[calMonth]} {calYear}
+                        </h3>
+                        <button onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(calYear + 1); } else setCalMonth(calMonth + 1); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                            <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+                        </button>
+                    </div>
 
+                    <div className="grid grid-cols-7 gap-px bg-slate-200 rounded-lg overflow-hidden">
+                        {['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'].map(d => (
+                            <div key={d} className="bg-slate-50 py-2 text-center text-xs font-semibold text-slate-500 uppercase">{d}</div>
+                        ))}
+                        {calDays.map((cell, i) => {
+                            const ds = cell.day > 0 ? `${calYear}-${(calMonth + 1).toString().padStart(2, '0')}-${cell.day.toString().padStart(2, '0')}` : '';
+                            const isToday = ds === todayCalStr;
+                            return (
+                                <div key={i} className={`bg-white min-h-[72px] p-1.5 ${cell.day === 0 ? 'bg-slate-50/50' : ''}`}>
+                                    {cell.day > 0 && (
+                                        <>
+                                            <div className={`text-xs font-medium mb-0.5 ${isToday ? 'bg-amber-600 text-white w-6 h-6 rounded-full flex items-center justify-center' : 'text-slate-600'}`}>
+                                                {cell.day}
+                                            </div>
+                                            {cell.events.slice(0, 2).map((evt, j) => (
+                                                <div key={j} className={`text-[10px] px-1 py-0.5 rounded truncate mb-0.5 ${evt.color} ${evt.isBirthday ? 'text-rose-800' : 'text-slate-800'}`} title={evt.title}>
+                                                    {evt.isBirthday ? '🎂 ' : ''}{evt.title}
+                                                </div>
+                                            ))}
+                                            {cell.events.length > 2 && (
+                                                <div className="text-[10px] text-slate-400">+{cell.events.length - 2}</div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Leyenda */}
+                    <div className="flex flex-wrap gap-3 mt-3 text-[10px]">
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-300"></span> Feriado LFT</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-200"></span> No se labora</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-200"></span> Vacaciones</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-200"></span> Empresa</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-rose-200"></span> Cumpleanos</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-200"></span> Aniversario</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-200"></span> Otro</span>
+                    </div>
+
+                    {/* Tabla de todas las fechas estilo CalendarPage */}
+                    {(() => {
+                        // Construir lista completa igual que CalendarPage
+                        type CalRow = { title: string; description: string; catLabel: string; catBg: string; catColor: string; dateRaw: string; dateStr: string; recurring: boolean; isSystem: boolean };
+                        const rows: CalRow[] = [];
+                        const catStyles: Record<string, { label: string; bg: string; color: string }> = {
+                            festivo: { label: 'Dia Festivo', bg: 'bg-red-100', color: 'text-red-800' },
+                            feriado_ley: { label: 'Feriado LFT', bg: 'bg-red-50', color: 'text-red-800' },
+                            vacaciones: { label: 'Vacaciones', bg: 'bg-emerald-100', color: 'text-emerald-800' },
+                            empresa: { label: 'Empresa', bg: 'bg-amber-100', color: 'text-amber-800' },
+                            capacitacion: { label: 'Capacitacion', bg: 'bg-blue-100', color: 'text-blue-800' },
+                            cumpleanos: { label: 'Cumpleanos', bg: 'bg-rose-100', color: 'text-rose-800' },
+                            aniversario: { label: 'Aniversario', bg: 'bg-purple-100', color: 'text-purple-800' },
+                            otro: { label: 'Otro', bg: 'bg-slate-100', color: 'text-slate-800' },
+                        };
+                        // DB dates
+                        importantDatesFromDb.forEach(d => {
+                            const cat = d.noLabor ? 'festivo' : d.category;
+                            const s = catStyles[cat] || catStyles.otro;
+                            const dateLabel = new Date(d.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })
+                                + (d.endDate && d.endDate !== '' ? ` - ${new Date(d.endDate + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}` : '');
+                            rows.push({ title: d.title, description: d.description || '', catLabel: s.label, catBg: s.bg, catColor: s.color, dateRaw: d.date, dateStr: dateLabel, recurring: d.recurring, isSystem: false });
+                        });
+                        // LFT
+                        const holidays = getOfficialHolidays(calYear);
+                        holidays.forEach(h => {
+                            if (importantDatesFromDb.some(d => d.date === h.date)) return;
+                            const s = catStyles.feriado_ley;
+                            rows.push({ title: h.name, description: 'Ley Federal del Trabajo', catLabel: s.label, catBg: s.bg, catColor: s.color, dateRaw: h.date, dateStr: new Date(h.date + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }), recurring: true, isSystem: true });
+                        });
+                        // Cumpleanos
+                        employees.forEach(emp => {
+                            if (!emp.fechaNacimiento) return;
+                            const mmdd = emp.fechaNacimiento.slice(5);
+                            const bd = `${calYear}-${mmdd}`;
+                            const s = catStyles.cumpleanos;
+                            const empName = `${emp.nombres} ${emp.paterno}`.trim();
+                            rows.push({ title: `🎂 Cumpleanos de ${empName}`, description: `${emp.nombres} ${emp.paterno} ${emp.materno}`, catLabel: s.label, catBg: s.bg, catColor: s.color, dateRaw: bd, dateStr: new Date(bd + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }), recurring: true, isSystem: true });
+                        });
+                        // Aniversarios laborales
+                        employees.forEach(emp => {
+                            if (!emp.fechaIngreso) return;
+                            const hireDate = new Date(emp.fechaIngreso + 'T12:00:00');
+                            const years = calYear - hireDate.getFullYear();
+                            if (years < 1) return;
+                            const mmdd = emp.fechaIngreso.slice(5);
+                            const ad = `${calYear}-${mmdd}`;
+                            const s = catStyles.aniversario;
+                            const empName = `${emp.nombres} ${emp.paterno}`.trim();
+                            rows.push({ title: `🏆 ${years} año${years > 1 ? 's' : ''} de ${empName}`, description: `Aniversario laboral - ${emp.nombres} ${emp.paterno} ${emp.materno}`, catLabel: s.label, catBg: s.bg, catColor: s.color, dateRaw: ad, dateStr: new Date(ad + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }), recurring: true, isSystem: true });
+                        });
+                        // Ordenar por fecha cruda
+                        rows.sort((a, b) => a.dateRaw.localeCompare(b.dateRaw));
+
+                        return (
+                            <div className="mt-4 border-t border-slate-200 pt-3">
+                                <h4 className="text-sm font-bold text-slate-700 mb-2">Todas las Fechas ({rows.length})</h4>
+                                <div className="overflow-x-auto max-h-[350px]">
+                                    <table className="w-full text-sm">
+                                        <thead className="sticky top-0 bg-slate-50">
+                                            <tr className="border-b border-slate-200">
+                                                <th className="text-left py-2 px-2 font-semibold text-slate-500 text-xs">Titulo</th>
+                                                <th className="text-center py-2 px-2 font-semibold text-slate-500 text-xs">Categoria</th>
+                                                <th className="text-center py-2 px-2 font-semibold text-slate-500 text-xs">Fecha</th>
+                                                <th className="text-center py-2 px-2 font-semibold text-slate-500 text-xs">Recurrente</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {rows.map((r, idx) => (
+                                                <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50/50">
+                                                    <td className="py-2 px-2">
+                                                        <p className="font-medium text-slate-800 text-sm">{r.title}</p>
+                                                        {r.description && <p className="text-xs text-slate-400">{r.description}</p>}
+                                                    </td>
+                                                    <td className="py-2 px-2 text-center">
+                                                        <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${r.catBg} ${r.catColor}`}>{r.catLabel}</span>
+                                                    </td>
+                                                    <td className="py-2 px-2 text-center text-xs text-slate-600">{r.dateStr}</td>
+                                                    <td className="py-2 px-2 text-center text-xs text-slate-500">{r.recurring ? 'Cada ano' : 'No'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        );
+                    })()}
+                </div>
+                </DragWrap>
+              );
+
+              // ===== VACATIONS =====
+              if (widgetId === 'vacations') return (
+                <DragWrap key={widgetId} id={widgetId} idx={idx}>
                 <InfoCard title="Tus Vacaciones" icon={<SunIcon />}>
                     {!currentEmployee ? (
-                        <p className="text-sm text-slate-500">No se encontró tu registro de empleado.</p>
+                        <p className="text-sm text-slate-500">No se encontro tu registro de empleado.</p>
                     ) : !vacationInfo ? (
-                        <p className="text-sm text-slate-500">No se pudo calcular la información de vacaciones.</p>
+                        <p className="text-sm text-slate-500">No se pudo calcular la informacion de vacaciones.</p>
                     ) : vacationInfo.eligible ? (
-                        <div className="space-y-2">
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                                <p className="text-sm font-semibold text-emerald-800">
-                                    Tienes derecho a {vacationInfo.daysEntitled} días de vacaciones
-                                </p>
-                                <p className="text-xs text-emerald-600 mt-1">
-                                    Por {vacationInfo.yearsWorked} {vacationInfo.yearsWorked === 1 ? 'año' : 'años'} de antigüedad
-                                </p>
+                        <div className="space-y-3">
+                            {/* Resumen de dias */}
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="text-center p-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+                                    <p className="text-lg font-bold text-emerald-800">{vacationInfo.daysEntitled}</p>
+                                    <p className="text-[10px] text-emerald-600 font-medium">Por ley</p>
+                                </div>
+                                <div className="text-center p-2 bg-orange-50 border border-orange-200 rounded-lg">
+                                    <p className="text-lg font-bold text-orange-800">{vacationUsedDays}</p>
+                                    <p className="text-[10px] text-orange-600 font-medium">Tomados</p>
+                                </div>
+                                <div className={`text-center p-2 rounded-lg border ${vacationAvailable > 0 ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
+                                    <p className={`text-lg font-bold ${vacationAvailable > 0 ? 'text-blue-800' : 'text-red-800'}`}>{vacationAvailable}</p>
+                                    <p className={`text-[10px] font-medium ${vacationAvailable > 0 ? 'text-blue-600' : 'text-red-600'}`}>Disponibles</p>
+                                </div>
                             </div>
                             <p className="text-xs text-slate-500">
-                                Próximo aniversario: {vacationInfo.nextAnniversary}
+                                {vacationInfo.yearsWorked} {vacationInfo.yearsWorked === 1 ? 'ano' : 'anos'} de antiguedad | Proximo aniversario: {vacationInfo.nextAnniversary}
                             </p>
+
+                            {/* Solicitudes de vacaciones */}
+                            {myVacationRequests.length > 0 && (
+                                <div className="border-t border-slate-200/80 pt-2">
+                                    <p className="text-xs font-semibold text-slate-600 mb-1.5">Solicitudes:</p>
+                                    {myVacationRequests.map(vr => (
+                                        <div key={vr.id} className="flex justify-between items-center text-xs py-1.5 border-b border-slate-100">
+                                            <div>
+                                                <span className="font-medium text-slate-700">{vr.daysRequested} dia{vr.daysRequested !== 1 ? 's' : ''}</span>
+                                                <span className="text-slate-400 ml-1">
+                                                    ({vr.dates.length > 0 && new Date(vr.dates[0] + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+                                                    {vr.dates.length > 1 && ` - ${new Date(vr.dates[vr.dates.length - 1] + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`})
+                                                </span>
+                                            </div>
+                                            <span className={`px-1.5 py-0.5 text-[10px] font-semibold rounded-full ${
+                                                vr.status === 'aprobada' ? 'bg-green-100 text-green-800' :
+                                                vr.status === 'rechazada' ? 'bg-red-100 text-red-800' :
+                                                'bg-yellow-100 text-yellow-800'
+                                            }`}>{vr.status}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <div className="space-y-2">
                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                                 <p className="text-sm font-medium text-amber-800">
-                                    Aún no cumples 1 año de antigüedad
+                                    Aun no cumples 1 ano de antiguedad
                                 </p>
                                 <p className="text-xs text-amber-600 mt-1">
-                                    Podrás gozar de vacaciones a partir del {vacationInfo.nextAnniversary}
+                                    Podras gozar de vacaciones a partir del {vacationInfo.nextAnniversary}
                                 </p>
                             </div>
                         </div>
                     )}
                 </InfoCard>
+                </DragWrap>
+              );
 
-                {/* Alerta de retardos - solo si 2+ retardos en 15 dias y mensajes habilitados */}
-                {motivationalEnabled && myTardinessInfo.count >= 2 && (
-                    <div className="col-span-1 lg:col-span-2 p-5 bg-gradient-to-r from-amber-50 via-orange-50 to-red-50 border border-amber-300 rounded-xl shadow-sm">
+              // ===== TARDINESS =====
+              if (widgetId === 'tardiness') return (
+                motivationalEnabled && myTardinessInfo.count >= 2 ? (
+                <DragWrap key={widgetId} id={widgetId} idx={idx} fullWidth>
+                    <div className="p-5 bg-gradient-to-r from-amber-50 via-orange-50 to-red-50 border border-amber-300 rounded-xl shadow-sm">
                         <div className="flex items-start gap-3">
                             <div className="flex-shrink-0 mt-0.5">
                                 <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -595,14 +1041,45 @@ export const DashboardPage: React.FC = () => {
                             </div>
                         </div>
                     </div>
-                )}
+                </DragWrap>
+                ) : <React.Fragment key={widgetId} />
+              );
 
+              // ===== SOLICITUDES =====
+              if (widgetId === 'solicitudes') return (
+                <DragWrap key={widgetId} id={widgetId} idx={idx}>
                 <InfoCard title="Mis Solicitudes" icon={<ClipboardIcon />}>
+                    {/* Papeletas de vacaciones aprobadas/pendientes */}
+                    {myVacationRequests.filter(v => v.status !== 'rechazada').length > 0 && (
+                        <div className="mb-3">
+                            <p className="text-xs font-semibold text-emerald-700 mb-1.5 flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25" /></svg>
+                                Vacaciones
+                            </p>
+                            {myVacationRequests.filter(v => v.status !== 'rechazada').map(vr => (
+                                <div key={vr.id} className={`rounded-lg border p-2.5 mb-2 ${vr.status === 'aprobada' ? 'border-green-200 bg-green-50/50' : 'border-yellow-200 bg-yellow-50/50'}`}>
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <p className="text-sm font-medium text-slate-800">{vr.daysRequested} dia{vr.daysRequested !== 1 ? 's' : ''} de vacaciones</p>
+                                            <p className="text-xs text-slate-500">
+                                                {vr.dates.map(d => new Date(d + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })).join(', ')}
+                                            </p>
+                                        </div>
+                                        <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                                            vr.status === 'aprobada' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                                        }`}>{vr.status}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Permisos laborales */}
                     {!currentEmployee ? (
-                        <p className="text-sm text-slate-500">No se encontró tu registro de empleado.</p>
-                    ) : myRequests.length === 0 ? (
+                        <p className="text-sm text-slate-500">No se encontro tu registro de empleado.</p>
+                    ) : myRequests.length === 0 && myVacationRequests.filter(v => v.status !== 'rechazada').length === 0 ? (
                         <p className="text-sm text-slate-500">No tienes solicitudes registradas.</p>
-                    ) : (
+                    ) : myRequests.length === 0 ? null : (
                         <div className="space-y-3">
                         {[...myRequests].reverse().map(req => {
                             const statusColors: Record<string, string> = {
@@ -702,15 +1179,196 @@ export const DashboardPage: React.FC = () => {
                         </div>
                     )}
                 </InfoCard>
+                </DragWrap>
+              );
 
-                <InfoCard title="Recordatorios" icon={<BellIcon />}>
-                    <ul className="list-disc list-inside space-y-1 text-sm text-slate-700">
-                        {reminders.map((item, index) => (
-                            <li key={index}>{item}</li>
-                        ))}
-                    </ul>
-                </InfoCard>
+              // ===== REMINDERS =====
+              // ===== POLICIES =====
+              if (widgetId === 'reminders') return null; // migrado a policies
+              if (widgetId === 'policies') return (
+                <DragWrap key="policies" id="policies" idx={idx}>
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <BellIcon />
+                            Politicas Internas
+                        </h3>
+                        {isAdmin && (
+                            <button
+                                onClick={() => {
+                                    if (!showPolicyForm) {
+                                        setEditingPolicy(null);
+                                        setTimeout(() => { if (policyTitleRef.current) policyTitleRef.current.value = ''; if (policyCategoryRef.current) policyCategoryRef.current.value = 'general'; if (policyContentRef.current) policyContentRef.current.innerHTML = ''; }, 0);
+                                    }
+                                    setShowPolicyForm(!showPolicyForm);
+                                }}
+                                className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+                            >
+                                {showPolicyForm ? 'Cancelar' : '+ Nueva Politica'}
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Form admin - se abre como modal */}
+
+                    {/* Lista de politicas */}
+                    {policies.length === 0 ? (
+                        <p className="text-sm text-slate-400">No hay politicas registradas.</p>
+                    ) : (
+                        <div className="space-y-2">
+                            {policies.map(pol => {
+                                const acked = hasPolicyAck(pol.id!);
+                                const catLabel = POLICY_CATEGORIES[pol.category] || pol.category;
+                                return (
+                                    <div key={pol.id} className={`border rounded-lg p-3 transition-colors ${acked ? 'border-green-200 bg-green-50/30' : 'border-amber-200 bg-amber-50/30'}`}>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="flex-1 min-w-0">
+                                                <button onClick={() => setViewingPolicy(pol)} className="text-sm font-semibold text-slate-800 hover:text-amber-700 text-left transition-colors">
+                                                    {pol.title}
+                                                </button>
+                                                <div className="flex items-center gap-2 mt-0.5">
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 font-medium">{catLabel}</span>
+                                                    <span className="text-[10px] text-slate-400">v{pol.version}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-1 flex-shrink-0">
+                                                {acked ? (
+                                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold">Aceptada</span>
+                                                ) : (
+                                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">Pendiente</span>
+                                                )}
+                                                {isAdmin && (
+                                                    <button onClick={() => { setEditingPolicy(pol); setShowPolicyForm(true); setTimeout(() => { if (policyTitleRef.current) policyTitleRef.current.value = pol.title; if (policyCategoryRef.current) policyCategoryRef.current.value = pol.category; if (policyContentRef.current) policyContentRef.current.innerHTML = pol.content; }, 50); }} className="p-1 text-slate-400 hover:text-amber-600 rounded" title="Editar">
+                                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+                </DragWrap>
+              );
+
+              return null;
+            })}
             </main>
+
+            {/* Modal de Politica */}
+            {viewingPolicy && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setViewingPolicy(null)}>
+                    <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg font-bold text-slate-800">{viewingPolicy.title}</h2>
+                                <p className="text-xs text-slate-500">{POLICY_CATEGORIES[viewingPolicy.category] || viewingPolicy.category} | Version {viewingPolicy.version}</p>
+                            </div>
+                            <button onClick={() => setViewingPolicy(null)} className="p-2 hover:bg-slate-100 rounded-lg">
+                                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                        <div className="p-5 overflow-y-auto flex-1">
+                            <div className="prose prose-sm max-w-none text-slate-700" dangerouslySetInnerHTML={{ __html: viewingPolicy.content.replace(/\n/g, '<br/>') }} />
+                        </div>
+                        <div className="p-5 border-t border-slate-200 flex items-center justify-between">
+                            {hasPolicyAck(viewingPolicy.id!) ? (
+                                <div className="flex items-center gap-2 text-green-700">
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    <span className="text-sm font-medium">Ya aceptaste esta politica</span>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={async () => { await handleAckPolicy(viewingPolicy); }}
+                                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-medium rounded-lg text-sm hover:from-emerald-700 hover:to-green-700 transition-all"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    Acepto y estoy de acuerdo con esta politica
+                                </button>
+                            )}
+                            <button onClick={() => setViewingPolicy(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cerrar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Modal Editor de Politica (Admin) */}
+            {showPolicyForm && isAdmin && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col">
+                        <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+                            <h2 className="text-lg font-bold text-slate-800">{editingPolicy ? 'Editar Politica' : 'Nueva Politica'}</h2>
+                            <button onClick={() => { setShowPolicyForm(false); setEditingPolicy(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
+                                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                        <form onSubmit={handleSavePolicy} className="flex flex-col flex-1 overflow-hidden">
+                            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Titulo de la Politica *</label>
+                                        <input ref={policyTitleRef} type="text" required defaultValue={editingPolicy?.title || ''} placeholder="Ej: Reglamento Interno de Oficinas" className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Categoria *</label>
+                                        <select ref={policyCategoryRef} defaultValue={editingPolicy?.category || 'general'} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-amber-500">
+                                            {Object.entries(POLICY_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Contenido de la Politica *</label>
+                                    {/* Barra de herramientas rich text */}
+                                    <div className="flex flex-wrap items-center gap-0.5 p-2 bg-slate-100 border border-slate-300 border-b-0 rounded-t-lg">
+                                        <button type="button" onClick={() => { document.execCommand('bold'); policyContentRef.current?.focus(); }} className="px-2.5 py-1.5 hover:bg-white rounded text-slate-700 text-sm font-bold border border-transparent hover:border-slate-200 transition-colors" title="Negrita (Ctrl+B)">N</button>
+                                        <button type="button" onClick={() => { document.execCommand('italic'); policyContentRef.current?.focus(); }} className="px-2.5 py-1.5 hover:bg-white rounded text-slate-700 text-sm italic border border-transparent hover:border-slate-200 transition-colors" title="Cursiva (Ctrl+I)">C</button>
+                                        <button type="button" onClick={() => { document.execCommand('underline'); policyContentRef.current?.focus(); }} className="px-2.5 py-1.5 hover:bg-white rounded text-slate-700 text-sm underline border border-transparent hover:border-slate-200 transition-colors" title="Subrayado (Ctrl+U)">S</button>
+                                        <div className="w-px h-5 bg-slate-300 mx-1"></div>
+                                        <button type="button" onClick={() => { document.execCommand('insertUnorderedList'); policyContentRef.current?.focus(); }} className="px-2 py-1.5 hover:bg-white rounded text-slate-600 text-xs font-medium border border-transparent hover:border-slate-200" title="Lista con vinetas">• Lista</button>
+                                        <button type="button" onClick={() => { document.execCommand('insertOrderedList'); policyContentRef.current?.focus(); }} className="px-2 py-1.5 hover:bg-white rounded text-slate-600 text-xs font-medium border border-transparent hover:border-slate-200" title="Lista numerada">1. Numerar</button>
+                                        <div className="w-px h-5 bg-slate-300 mx-1"></div>
+                                        <button type="button" onClick={() => { document.execCommand('justifyLeft'); policyContentRef.current?.focus(); }} className="px-2 py-1.5 hover:bg-white rounded text-slate-600 border border-transparent hover:border-slate-200" title="Alinear izquierda">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h10.5M3.75 17.25h16.5" /></svg>
+                                        </button>
+                                        <button type="button" onClick={() => { document.execCommand('justifyCenter'); policyContentRef.current?.focus(); }} className="px-2 py-1.5 hover:bg-white rounded text-slate-600 border border-transparent hover:border-slate-200" title="Centrar">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M6.75 12h10.5M3.75 17.25h16.5" /></svg>
+                                        </button>
+                                        <div className="w-px h-5 bg-slate-300 mx-1"></div>
+                                        <select onChange={(e) => { if (e.target.value) { document.execCommand('fontSize', false, '7'); const sel = window.getSelection(); if (sel && sel.rangeCount) { const range = sel.getRangeAt(0); const spans = range.commonAncestorContainer.parentElement?.querySelectorAll('font[size="7"]'); spans?.forEach(s => { (s as HTMLElement).removeAttribute('size'); (s as HTMLElement).style.fontSize = e.target.value; }); } policyContentRef.current?.focus(); e.target.value = ''; } }} className="px-1 py-1 text-xs border border-slate-200 rounded bg-white text-slate-600 outline-none" defaultValue="">
+                                            <option value="" disabled>Tamano</option>
+                                            <option value="12px">Normal</option>
+                                            <option value="16px">Mediano</option>
+                                            <option value="20px">Grande</option>
+                                            <option value="24px">Titulo</option>
+                                        </select>
+                                        <div className="w-px h-5 bg-slate-300 mx-1"></div>
+                                        <button type="button" onClick={() => { document.execCommand('insertHorizontalRule'); policyContentRef.current?.focus(); }} className="px-2 py-1.5 hover:bg-white rounded text-slate-600 text-xs font-medium border border-transparent hover:border-slate-200" title="Separador">── Linea</button>
+                                        <button type="button" onClick={() => { document.execCommand('undo'); policyContentRef.current?.focus(); }} className="px-2 py-1.5 hover:bg-white rounded text-slate-500 text-xs border border-transparent hover:border-slate-200" title="Deshacer">Deshacer</button>
+                                        <button type="button" onClick={() => { document.execCommand('redo'); policyContentRef.current?.focus(); }} className="px-2 py-1.5 hover:bg-white rounded text-slate-500 text-xs border border-transparent hover:border-slate-200" title="Rehacer">Rehacer</button>
+                                    </div>
+                                    {/* Editor contentEditable */}
+                                    <div
+                                        ref={policyContentRef}
+                                        contentEditable
+                                        suppressContentEditableWarning
+                                        className="w-full px-4 py-3 border border-slate-300 rounded-b-lg text-sm outline-none focus:ring-2 focus:ring-amber-500 min-h-[350px] max-h-[500px] overflow-y-auto leading-relaxed bg-white"
+                                        style={{ whiteSpace: 'pre-wrap' }}
+                                        dangerouslySetInnerHTML={{ __html: editingPolicy?.content || '' }}
+                                    />
+                                </div>
+                            </div>
+                            <div className="p-5 border-t border-slate-200 flex items-center justify-between">
+                                <button type="submit" disabled={savingPolicy} className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-medium rounded-lg text-sm hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 transition-all">
+                                    {savingPolicy ? 'Guardando...' : editingPolicy ? 'Actualizar Politica' : 'Crear Politica'}
+                                </button>
+                                <button type="button" onClick={() => { setShowPolicyForm(false); setEditingPolicy(null); }} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

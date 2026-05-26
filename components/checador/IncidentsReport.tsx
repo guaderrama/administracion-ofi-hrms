@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { LogEntry } from '../../types';
 import { IncidentType, LogType } from '../../types';
+import { toLocalDateKey } from '../../utils/dateUtils';
 
 interface IncidentsReportProps {
   logs: LogEntry[];
@@ -22,7 +23,7 @@ export const IncidentsReport: React.FC<IncidentsReportProps> = ({ logs, getEffec
 
         // Agrupar logs por colaborador y día
         logs.forEach(log => {
-            const date = new Date(log.timestamp).toISOString().slice(0, 10);
+            const date = toLocalDateKey(log.timestamp);
             const key = `${log.employeeName}__${date}`;
             if (!groupedLogs[key]) {
                 groupedLogs[key] = [];
@@ -34,10 +35,10 @@ export const IncidentsReport: React.FC<IncidentsReportProps> = ({ logs, getEffec
             const [employeeName, date] = key.split('__');
             const dailyLogs = groupedLogs[key].sort((a, b) => a.timestamp - b.timestamp);
             
-            const checkIn = dailyLogs.find(log => log.type === LogType.ENTRADA);
-            const checkOut = dailyLogs.find(log => log.type === LogType.SALIDA);
-            const lunchStart = dailyLogs.find(log => log.type === LogType.INICIO_COMIDA);
-            const lunchEnd = dailyLogs.find(log => log.type === LogType.FIN_COMIDA);
+            const checkIn = dailyLogs.find(log => log.type === LogType.ENTRADA); // primera entrada
+            const checkOut = [...dailyLogs].reverse().find(log => log.type === LogType.SALIDA); // ultima salida
+            const lunchStarts = dailyLogs.filter(log => log.type === LogType.INICIO_COMIDA);
+            const lunchEnds = dailyLogs.filter(log => log.type === LogType.FIN_COMIDA);
 
             // 1. Verificar retardos
             if (checkIn) {
@@ -73,18 +74,27 @@ export const IncidentsReport: React.FC<IncidentsReportProps> = ({ logs, getEffec
                 }
             }
             
-            // 2. Verificar comidas no registradas
-            if (checkIn && checkOut && (!lunchStart || !lunchEnd)) {
-                 incidents.push({
-                    employeeName,
-                    date,
-                    type: IncidentType.MISSED_LUNCH,
-                    details: 'No se registraron ambos tiempos de comida.'
-                });
+            // 2. Verificar comidas no registradas o pausas abiertas
+            if (checkIn && checkOut) {
+                if (lunchStarts.length === 0 && lunchEnds.length === 0) {
+                    incidents.push({
+                        employeeName,
+                        date,
+                        type: IncidentType.MISSED_LUNCH,
+                        details: 'No se registraron tiempos de comida.'
+                    });
+                } else if (lunchStarts.length > lunchEnds.length) {
+                    incidents.push({
+                        employeeName,
+                        date,
+                        type: IncidentType.MISSED_LUNCH,
+                        details: `${lunchStarts.length - lunchEnds.length} pausa(s) de comida sin cierre.`
+                    });
+                }
             }
 
             // 3. Verificar salidas no registradas (para días pasados)
-            const today = new Date().toISOString().slice(0, 10);
+            const today = toLocalDateKey(Date.now());
             if (date < today && checkIn && !checkOut) {
                  incidents.push({
                     employeeName,

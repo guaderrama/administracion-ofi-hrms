@@ -138,6 +138,8 @@ export interface Employee {
 export interface LogEntry {
   id?: string; // Firestore document ID for editing/deleting
   employeeName: string;
+  employeeCode?: string; // Codigo del empleado para matching robusto
+  createdByUid?: string; // UID del usuario que creó el registro
   type: LogType;
   timestamp: number;
   location?: Location;
@@ -185,4 +187,26 @@ export interface IncomeEntry {
   paymentConcept: PaymentConcept;
   amount: number;
   notes?: string;
+}
+
+// --- Attendance Day (resumen validado de asistencia por día) ---
+
+export type AttendanceDayStatus = 'complete' | 'incomplete' | 'no_checkout' | 'incomplete_lunch' | 'anomaly';
+
+export interface AttendanceDay {
+  id?: string; // formato: {employeeCode}__{YYYY-MM-DD}
+  employeeCode: string;
+  employeeName: string;
+  date: string; // YYYY-MM-DD local
+  status: AttendanceDayStatus;
+  checkInTimestamp?: number;
+  checkOutTimestamp?: number;
+  lunchBreaks: { start: number; end: number }[];
+  workedMinutes: number | null;
+  isLate: boolean;
+  lateMinutes: number;
+  payableDay: boolean;
+  validationErrors: string[];
+  sourceLogIds: string[];
+  computedAt: number;
 }
