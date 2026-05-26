@@ -112,20 +112,25 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     setIsSaving(true);
     try {
       const name = reportName || generateReportName(sales);
-      // Calcular comisiones por empleado para guardar con el reporte
+      // Calcular comisiones por empleado con desglose caminata/semana
       const empCommissions: Record<string, number> = {};
+      const empCommissionBreakdown: Record<string, { caminata: number; semana: number; originales: number }> = {};
       juevesDistribution.forEach(e => {
         if (e.commission > 0) {
           empCommissions[e.employeeCode] = (empCommissions[e.employeeCode] || 0) + e.commission;
+          if (!empCommissionBreakdown[e.employeeCode]) empCommissionBreakdown[e.employeeCode] = { caminata: 0, semana: 0, originales: 0 };
+          empCommissionBreakdown[e.employeeCode].caminata += e.commission;
         }
       });
       semanaDistribution.forEach(e => {
         if (e.commission > 0) {
           empCommissions[e.employeeCode] = (empCommissions[e.employeeCode] || 0) + e.commission;
+          if (!empCommissionBreakdown[e.employeeCode]) empCommissionBreakdown[e.employeeCode] = { caminata: 0, semana: 0, originales: 0 };
+          empCommissionBreakdown[e.employeeCode].semana += e.commission;
         }
       });
 
-      const reportData = { name, fileName, settings, sales, presentMap, semanaComisionMap, status: 'active' as const, employeeCommissions: empCommissions };
+      const reportData = { name, fileName, settings, sales, presentMap, semanaComisionMap, status: 'active' as const, employeeCommissions: empCommissions, employeeCommissionBreakdown: empCommissionBreakdown };
       if (currentReportId) {
         await commissionsService.update(currentReportId, reportData);
         toast.success('Reporte actualizado.');

@@ -136,16 +136,23 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const employeeCommissionBreakdown = useMemo((): Record<string, { total: number; caminata: number; semana: number; originales: number }> => {
     const result: Record<string, { total: number; caminata: number; semana: number; originales: number }> = {};
     selectedCommissionIds.forEach(reportId => {
-      const report = commissionReports.find(r => r.id === reportId);
+      const report = commissionReports.find(r => r.id === reportId) as any;
       if (!report?.employeeCommissions) return;
-      const isCaminata = (report.name || '').toLowerCase().includes('caminata');
+
       Object.entries(report.employeeCommissions).forEach(([code, amount]) => {
         if (!result[code]) result[code] = { total: 0, caminata: 0, semana: 0, originales: 0 };
         result[code].total += amount as number;
-        if (isCaminata) {
-          result[code].caminata += amount as number;
+
+        // Usar desglose guardado si existe, sino inferir del nombre
+        const breakdown = report.employeeCommissionBreakdown?.[code];
+        if (breakdown) {
+          result[code].caminata += breakdown.caminata || 0;
+          result[code].semana += breakdown.semana || 0;
+          result[code].originales += breakdown.originales || 0;
         } else {
-          result[code].semana += amount as number;
+          const isCaminata = (report.name || '').toLowerCase().includes('caminata');
+          if (isCaminata) result[code].caminata += amount as number;
+          else result[code].semana += amount as number;
         }
       });
     });
