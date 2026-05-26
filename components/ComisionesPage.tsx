@@ -19,9 +19,13 @@ import {
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
 function formatDateShort(dateStr: string): string {
-  if (!dateStr) return '';
-  const [y, m, d] = dateStr.split('-');
-  return `${parseInt(d)} ${MESES[parseInt(m) - 1]} ${y}`;
+  if (!dateStr) return '—';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const [y, m, d] = parts;
+  const month = parseInt(m) - 1;
+  if (isNaN(month) || month < 0 || month > 11) return dateStr;
+  return `${parseInt(d)} ${MESES[month]} ${y}`;
 }
 
 function generateReportName(sales: SaleGroup[]): string {
@@ -58,6 +62,8 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
   const [presentMap, setPresentMap] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'upload' | 'jueves' | 'semana'>('upload');
   const [fileName, setFileName] = useState('');
+  // Empleados que comisionan en semana (por defecto: solo asesores de venta + manuales)
+  const [semanaComisionMap, setSemanaComisionMap] = useState<Record<string, boolean>>({});
 
   // Persistencia
   const [savedReports, setSavedReports] = useState<SavedCommissionReport[]>([]);
@@ -66,14 +72,27 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
   const [reportName, setReportName] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; report: SavedCommissionReport | null }>({ isOpen: false, report: null });
 
+  const SALES_ROLES = ['asesor', 'asesora', 'vendedor', 'vendedora', 'ventas'];
+
   useEffect(() => {
     const unsub = employeesService.subscribe(emps => {
       setEmployees(emps);
-      // Todos presentes por defecto
       const map: Record<string, boolean> = {};
-      emps.forEach(emp => { map[emp.id] = true; });
+      const comMap: Record<string, boolean> = {};
+      emps.forEach(emp => {
+        map[emp.id] = true;
+        // Auto-detectar asesores de venta por puesto
+        const puesto = (emp.puesto || '').toLowerCase();
+        comMap[emp.id] = SALES_ROLES.some(role => puesto.includes(role));
+      });
       setPresentMap(prev => {
         const merged = { ...map };
+        Object.keys(prev).forEach(k => { if (k in merged) merged[k] = prev[k]; });
+        return merged;
+      });
+      setSemanaComisionMap(prev => {
+        // Mantener selecciones manuales, solo inicializar nuevos
+        const merged = { ...comMap };
         Object.keys(prev).forEach(k => { if (k in merged) merged[k] = prev[k]; });
         return merged;
       });
@@ -106,7 +125,7 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
         }
       });
 
-      const reportData = { name, fileName, settings, sales, presentMap, status: 'active' as const, employeeCommissions: empCommissions };
+      const reportData = { name, fileName, settings, sales, presentMap, semanaComisionMap, status: 'active' as const, employeeCommissions: empCommissions };
       if (currentReportId) {
         await commissionsService.update(currentReportId, reportData);
         toast.success('Reporte actualizado.');
@@ -138,6 +157,13 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     setFileName(report.fileName || '');
     setReportName(report.name || '');
     setCurrentReportId(report.id || null);
+    if ((report as any).semanaComisionMap) {
+      setSemanaComisionMap(prev => {
+        const merged = { ...prev };
+        Object.keys((report as any).semanaComisionMap).forEach(k => { if (k in merged) merged[k] = (report as any).semanaComisionMap[k]; });
+        return merged;
+      });
+    }
     setActiveTab('jueves');
     toast.success(`Reporte "${report.name}" cargado.`);
   };
@@ -228,8 +254,13 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     [juevesSummary, employees, presentMap]
   );
   const semanaDistribution = useMemo(
-    () => sales.length > 0 ? distributeSemanaCommission(sales, settings, employees) : [],
-    [sales, settings, employees]
+    () => {
+      if (sales.length === 0) return [];
+      // Solo incluir empleados marcados como comisionables
+      const comisionables = employees.filter(emp => semanaComisionMap[emp.id]);
+      return distributeSemanaCommission(sales, settings, comisionables);
+    },
+    [sales, settings, employees, semanaComisionMap]
   );
 
   // Ventas excluidas
@@ -713,7 +744,37 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
 
           {/* Distribución por vendedor */}
           <Card>
-            <h3 className="text-lg font-bold text-slate-800 mb-4">Comisión por Vendedor</h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-slate-800">Comisión por Vendedor</h3>
+              <p className="text-xs text-slate-500">Solo empleados con rol de ventas comisionan. Puedes agregar otros manualmente.</p>
+            </div>
+            <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+              <p className="text-xs font-medium text-slate-600 mb-2">Colaboradores que comisionan esta semana:</p>
+              <div className="flex flex-wrap gap-2">
+                {employees.map(emp => {
+                  const isVendor = SALES_ROLES.some(role => (emp.puesto || '').toLowerCase().includes(role));
+                  return (
+                    <label
+                      key={emp.id}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors ${
+                        semanaComisionMap[emp.id]
+                          ? 'bg-green-100 text-green-800 border border-green-300'
+                          : 'bg-slate-100 text-slate-500 border border-slate-200'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!semanaComisionMap[emp.id]}
+                        onChange={() => setSemanaComisionMap(prev => ({ ...prev, [emp.id]: !prev[emp.id] }))}
+                        className="sr-only"
+                      />
+                      {`${emp.nombres} ${emp.paterno}`}
+                      {isVendor && <span title="Asesor(a) de ventas">🏷️</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
