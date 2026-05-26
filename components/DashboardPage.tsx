@@ -250,6 +250,46 @@ export const DashboardPage: React.FC = () => {
         return { count: lateDates.length, dates: lateDates };
     }, [allLogs, currentEmployee, toleranceMinutes]);
 
+    // Días con registro incompleto en la semana actual
+    const incompleteDays = useMemo(() => {
+        if (!currentEmployee) return [];
+        const fullName = `${currentEmployee.nombres} ${currentEmployee.paterno} ${currentEmployee.materno || ''}`.trim().toUpperCase();
+        const today = new Date();
+        // Inicio de la semana (lunes)
+        const mondayOffset = today.getDay() === 0 ? 6 : today.getDay() - 1;
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - mondayOffset);
+        monday.setHours(0, 0, 0, 0);
+
+        const days: string[] = [];
+        const cursor = new Date(monday);
+        while (cursor < today) {
+            const dayOfWeek = cursor.getDay();
+            // Saltar domingos y sábados no laborables
+            if (dayOfWeek !== 0 && !(dayOfWeek === 6 && currentEmployee.horarioSabado?.toLowerCase().includes('no labora'))) {
+                const dateStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+                const dayStart = new Date(cursor).getTime();
+                const dayEnd = dayStart + 86400000;
+
+                const dayLogs = allLogs.filter(log =>
+                    log.timestamp >= dayStart && log.timestamp < dayEnd &&
+                    log.employeeName.toUpperCase().trim() === fullName
+                );
+
+                const hasEntrada = dayLogs.some(l => l.type === LogType.ENTRADA);
+                const hasSalida = dayLogs.some(l => l.type === LogType.SALIDA);
+
+                if (hasEntrada && !hasSalida) {
+                    days.push(dateStr);
+                } else if (!hasEntrada) {
+                    days.push(dateStr);
+                }
+            }
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        return days;
+    }, [allLogs, currentEmployee]);
+
     // Mensaje motivacional del dia (mismo sistema que AdminView)
     const dailyMotivationalMessage = useMemo(() => {
         const messages = [
@@ -556,6 +596,27 @@ export const DashboardPage: React.FC = () => {
                 <h1 className="font-serif text-4xl font-bold text-slate-900">Bienvenido al Portal</h1>
                 <p className="mt-2 text-lg text-slate-700">Aquí tienes un resumen de lo que está pasando este mes.</p>
             </header>
+
+            {/* Alerta de registros incompletos */}
+            {incompleteDays.length > 0 && !isAdmin && (
+                <div className="mb-6 p-4 bg-amber-50 border-2 border-amber-300 rounded-xl">
+                    <div className="flex items-start gap-3">
+                        <span className="text-2xl">⚠️</span>
+                        <div>
+                            <h3 className="font-bold text-amber-900">Registros de asistencia incompletos</h3>
+                            <p className="text-sm text-amber-800 mt-1">
+                                Tienes <strong>{incompleteDays.length} día{incompleteDays.length > 1 ? 's' : ''}</strong> esta semana sin registro completo (falta entrada o salida).
+                                Acércate a Administración para regularizar tu asistencia.
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                {incompleteDays.map(d => (
+                                    <span key={d} className="px-2 py-1 bg-amber-200 text-amber-900 rounded text-xs font-mono">{d}</span>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Anuncios */}
             {(activeAnnouncements.length > 0 || (isAdmin || isSupervisor)) && (

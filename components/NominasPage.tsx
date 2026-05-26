@@ -164,23 +164,23 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
               // Sábado no laborable: pagado como descanso
               workedDays.add(dayKeyUnpadded);
             } else {
-              // Día laborable: verificar asistencia
+              // Día laborable: contar como trabajado si tiene al menos ENTRADA
+              // (registros incompletos se alertan al empleado, pero no descuentan día)
               const attendanceDay = daysByDate.get(dateStr);
               if (attendanceDay) {
-                // Tiene AttendanceDay → usar fuente validada
-                if (attendanceDay.payableDay) {
+                // Tiene AttendanceDay → pagar si tiene al menos entrada
+                if (attendanceDay.checkInTimestamp) {
                   workedDays.add(dayKeyUnpadded);
                 }
               } else if (logsByDay[dateStr]) {
-                // Sin AttendanceDay pero tiene logs → fallback ENTRADA+SALIDA
+                // Sin AttendanceDay → verificar si tiene al menos ENTRADA
                 const dayLogs = logsByDay[dateStr];
                 const hasEntrada = dayLogs.some(l => l.type === LogType.ENTRADA);
-                const hasSalida = dayLogs.some(l => l.type === LogType.SALIDA);
-                if (hasEntrada && hasSalida) {
+                if (hasEntrada) {
                   workedDays.add(dayKeyUnpadded);
                 }
               }
-              // Si no tiene ni AttendanceDay ni logs → no cuenta (0)
+              // Sin AttendanceDay ni logs → no cuenta
             }
 
             dayCursor.setDate(dayCursor.getDate() + 1);
