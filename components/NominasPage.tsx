@@ -348,40 +348,47 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   };
 
   // Guardar corte de nomina
-  const handleSaveCut = async () => {
+  const [currentCutId, setCurrentCutId] = useState<string | null>(null);
+
+  const buildCutData = () => {
+    const cutEmployees = employees.map(emp => {
+      const days = daysWorked[emp.id] ?? diasEnPeriodo;
+      const salary = calculateSalary(emp, days, diasEnPeriodo);
+      const vacation = calculateVacation(emp.fechaIngreso);
+      return {
+        codigo: emp.codigo || '',
+        nombre: getEmployeeFullName(emp),
+        fechaIngreso: emp.fechaIngreso,
+        diasVacaciones: vacation.daysEntitled,
+        aplicaVacaciones: vacation.eligible,
+        diasTrabajados: days,
+        diasPeriodo: diasEnPeriodo,
+        bonoPuntualidad: salary.bonoPuntualidad,
+        bonoObjetivos: salary.bonoObjetivos,
+        apoyoGasolina: salary.apoyoGasolina,
+        comision: employeeCommissions[emp.codigo] || 0,
+        total: salary.netoAPagar + (employeeCommissions[emp.codigo] || 0),
+      };
+    });
+    const cutTotals = cutEmployees.reduce(
+      (acc, e) => ({
+        bonoPuntualidad: acc.bonoPuntualidad + e.bonoPuntualidad,
+        bonoObjetivos: acc.bonoObjetivos + e.bonoObjetivos,
+        apoyoGasolina: acc.apoyoGasolina + e.apoyoGasolina,
+        total: acc.total + e.total,
+      }),
+      { bonoPuntualidad: 0, bonoObjetivos: 0, apoyoGasolina: 0, total: 0 }
+    );
+    return { cutEmployees, cutTotals };
+  };
+
+  // Guardar borrador (se puede seguir editando)
+  const handleSaveDraft = async () => {
     if (employees.length === 0) return;
     setSavingCut(true);
     try {
-      const cutEmployees = employees.map(emp => {
-        const days = daysWorked[emp.id] ?? diasEnPeriodo;
-        const salary = calculateSalary(emp, days, diasEnPeriodo);
-        const vacation = calculateVacation(emp.fechaIngreso);
-        return {
-          codigo: emp.codigo || '',
-          nombre: getEmployeeFullName(emp),
-          fechaIngreso: emp.fechaIngreso,
-          diasVacaciones: vacation.daysEntitled,
-          aplicaVacaciones: vacation.eligible,
-          diasTrabajados: days,
-          diasPeriodo: diasEnPeriodo,
-          bonoPuntualidad: salary.bonoPuntualidad,
-          bonoObjetivos: salary.bonoObjetivos,
-          apoyoGasolina: salary.apoyoGasolina,
-          comision: employeeCommissions[emp.codigo] || 0,
-          total: salary.netoAPagar + (employeeCommissions[emp.codigo] || 0),
-        };
-      });
-      const cutTotals = cutEmployees.reduce(
-        (acc, e) => ({
-          bonoPuntualidad: acc.bonoPuntualidad + e.bonoPuntualidad,
-          bonoObjetivos: acc.bonoObjetivos + e.bonoObjetivos,
-          apoyoGasolina: acc.apoyoGasolina + e.apoyoGasolina,
-          comision: (acc as any).comision ? (acc as any).comision + (e as any).comision : (e as any).comision,
-          total: acc.total + e.total,
-        }),
-        { bonoPuntualidad: 0, bonoObjetivos: 0, apoyoGasolina: 0, total: 0 }
-      );
-      await payrollCutsService.create({
+      const { cutEmployees, cutTotals } = buildCutData();
+      const cutData = {
         startDate: selectedPeriod.startDate,
         endDate: selectedPeriod.endDate,
         quincena: selectedPeriod.quincena,
@@ -390,8 +397,46 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         totals: cutTotals,
         createdBy: user?.email || '',
         createdAt: new Date(),
-      });
+        status: 'borrador' as const,
+        commissionReportIds: [...selectedCommissionIds],
+        daysWorked,
+      };
+      if (currentCutId) {
+        await payrollCutsService.update(currentCutId, cutData);
+      } else {
+        const id = await payrollCutsService.create(cutData);
+        setCurrentCutId(id);
+      }
+    } finally {
+      setSavingCut(false);
+    }
+  };
 
+  // Cerrar periodo (bloquea comisiones, ya no se puede editar)
+  const handleClosePeriod = async () => {
+    if (employees.length === 0) return;
+    if (!confirm('¿Cerrar este periodo de nómina? Las comisiones incluidas quedarán bloqueadas y no se podrán modificar.')) return;
+    setSavingCut(true);
+    try {
+      const { cutEmployees, cutTotals } = buildCutData();
+      const cutData = {
+        startDate: selectedPeriod.startDate,
+        endDate: selectedPeriod.endDate,
+        quincena: selectedPeriod.quincena,
+        periodLabel: getPeriodLabel(selectedPeriod),
+        employees: cutEmployees,
+        totals: cutTotals,
+        createdBy: user?.email || '',
+        createdAt: new Date(),
+        status: 'cerrado' as const,
+        commissionReportIds: [...selectedCommissionIds],
+        daysWorked,
+      };
+      if (currentCutId) {
+        await payrollCutsService.update(currentCutId, cutData);
+      } else {
+        await payrollCutsService.create(cutData);
+      }
       // Bloquear comisiones seleccionadas con candado
       const periodLabel = getPeriodLabel(selectedPeriod);
       for (const reportId of selectedCommissionIds) {
@@ -402,9 +447,22 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         }
       }
       setSelectedCommissionIds(new Set());
+      setCurrentCutId(null);
     } finally {
       setSavingCut(false);
     }
+  };
+
+  // Cargar borrador guardado
+  const handleLoadDraft = (cut: PayrollCut) => {
+    if (cut.status === 'cerrado') return;
+    setCurrentCutId(cut.id || null);
+    // Restaurar periodo
+    setSelectedPeriod({ startDate: cut.startDate, endDate: cut.endDate, quincena: cut.quincena as 1 | 2 });
+    // Restaurar días trabajados
+    if (cut.daysWorked) setDaysWorked(cut.daysWorked);
+    // Restaurar comisiones seleccionadas
+    if (cut.commissionReportIds) setSelectedCommissionIds(new Set(cut.commissionReportIds));
   };
 
   // Descargar corte como Excel CSV
@@ -720,14 +778,24 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={handleSaveCut}
+                onClick={handleSaveDraft}
+                disabled={savingCut || employees.length === 0 || !!attendanceError || loadingAttendance}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+                </svg>
+                {savingCut ? 'Guardando...' : currentCutId ? 'Actualizar Borrador' : 'Guardar Borrador'}
+              </button>
+              <button
+                onClick={handleClosePeriod}
                 disabled={savingCut || employees.length === 0 || !!attendanceError || loadingAttendance}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-600 to-green-600 text-white rounded-lg text-sm font-medium hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 transition-all"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                 </svg>
-                {savingCut ? 'Guardando...' : 'Guardar Corte Actual'}
+                Cerrar Periodo
               </button>
               <button
                 onClick={() => setShowSavedCuts(!showSavedCuts)}
@@ -756,6 +824,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                         <th className="text-right py-2 px-3 font-semibold text-slate-600 text-xs">Total Nomina</th>
                         <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Guardado por</th>
                         <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Fecha</th>
+                        <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Estado</th>
                         <th className="text-center py-2 px-3 font-semibold text-slate-600 text-xs">Acciones</th>
                       </tr>
                     </thead>
@@ -773,7 +842,22 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                             {new Date(cut.createdAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </td>
                           <td className="py-2.5 px-3 text-center">
+                            {cut.status === 'cerrado' ? (
+                              <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-semibold">🔒 Cerrado</span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-semibold">📝 Borrador</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
                             <div className="flex gap-1 justify-center">
+                              {cut.status !== 'cerrado' && (
+                                <button
+                                  onClick={() => handleLoadDraft(cut)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-800 rounded-md text-xs font-medium hover:bg-blue-200 transition-colors"
+                                >
+                                  Cargar
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleDownloadExcel(cut)}
                                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 rounded-md text-xs font-medium hover:bg-green-200 transition-colors"

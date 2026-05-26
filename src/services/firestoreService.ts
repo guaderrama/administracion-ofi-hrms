@@ -1062,6 +1062,9 @@ export interface PayrollCut {
   totals: { bonoPuntualidad: number; bonoObjetivos: number; apoyoGasolina: number; total: number };
   createdBy: string;
   createdAt: Date;
+  status?: 'borrador' | 'cerrado';
+  commissionReportIds?: string[];
+  daysWorked?: Record<string, number>;
 }
 
 export const payrollCutsService = {
@@ -1071,6 +1074,14 @@ export const payrollCutsService = {
       createdAt: Timestamp.now(),
     });
     return docRef.id;
+  },
+
+  async update(id: string, data: Partial<PayrollCut>): Promise<void> {
+    const { id: _, ...updateData } = data as any;
+    await updateDoc(doc(db, PAYROLL_CUTS_COLLECTION, id), {
+      ...updateData,
+      updatedAt: Timestamp.now(),
+    });
   },
 
   async remove(id: string): Promise<void> {
