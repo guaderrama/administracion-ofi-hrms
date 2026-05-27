@@ -258,19 +258,13 @@ export const ChecadorPage: React.FC = () => {
 
         setIsProcessingLog(true);
 
+        // Obtener ubicación rápido (timeout corto, acepta cache reciente)
         navigator.geolocation.getCurrentPosition(
             (position) => {
-                const location: Location = {
-                    lat: position.coords.latitude,
-                    lon: position.coords.longitude,
-                };
-                saveLog(type, location);
+                saveLog(type, { lat: position.coords.latitude, lon: position.coords.longitude });
             },
-            (error) => {
-                console.error("Error obteniendo la geolocalización:", error);
-                saveLog(type);
-            },
-            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+            () => saveLog(type),
+            { enableHighAccuracy: false, timeout: 2000, maximumAge: 30000 }
         );
     };
 
@@ -280,7 +274,6 @@ export const ChecadorPage: React.FC = () => {
             return;
         }
 
-        // Buscar codigo del empleado para matching robusto
         const matchedEmp = detailedEmployees.find(emp => {
             const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
             return authenticatedEmployee.name.toUpperCase().trim() === fullName ||
@@ -292,31 +285,20 @@ export const ChecadorPage: React.FC = () => {
             employeeName: authenticatedEmployee.name,
             employeeCode: matchedEmp?.codigo || '',
             type,
-            timestamp: 0,
+            timestamp: Date.now(),
             ...(location ? { location } : {}),
         };
 
         try {
-            await logsService.createWithValidation(newLog);
-            await loadDailyLogs(authenticatedEmployee);
-            toast.success(`${logTypeLabels[type] || type} registrado correctamente.`);
+            // Crear log directamente (rápido, sin transacción)
+            await logsService.create(newLog);
+            toast.success(`${logTypeLabels[type] || type} registrado.`);
+            // Actualizar logs en background
+            loadDailyLogs(authenticatedEmployee);
         } catch (error: any) {
             console.error('Error al guardar registro:', error);
-            if (error.message?.includes('Transición inválida')) {
-                toast.warning(error.message);
-                await loadDailyLogs(authenticatedEmployee);
-            } else {
-                // Último intento: crear log directamente sin transacción
-                try {
-                    await logsService.create({ ...newLog, timestamp: Date.now() });
-                    await loadDailyLogs(authenticatedEmployee);
-                    toast.success(`${logTypeLabels[type] || type} registrado.`);
-                    return;
-                } catch (directErr: any) {
-                    console.error('Fallback directo falló:', directErr);
-                }
-                toast.error(`Error: ${error.message || 'desconocido'}`);
-            }
+            toast.error(`Error: ${error.message || 'desconocido'}`);
+            loadDailyLogs(authenticatedEmployee);
         } finally {
             setIsProcessingLog(false);
         }
