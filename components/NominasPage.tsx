@@ -1002,8 +1002,17 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                     {formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0))}
                   </td>
                 </>)}
+                {Object.values(loanDeductions).some(v => v > 0) && (
+                  <td className="py-3 px-2 text-right font-bold text-red-700">
+                    -{formatCurrency(Object.values(loanDeductions).reduce((a, b) => a + b, 0))}
+                  </td>
+                )}
                 <td className="py-3 px-2 text-right font-bold text-amber-800 text-base">
-                  {formatCurrency(totals.total + Object.values(employeeCommissions).reduce((a, b) => a + b, 0))}
+                  {formatCurrency(
+                    totals.total
+                    + Object.values(employeeCommissions).reduce((a, b) => a + b, 0)
+                    - Object.values(loanDeductions).reduce((a, b) => a + b, 0)
+                  )}
                 </td>
                 {canEdit && <td></td>}
               </tr>
