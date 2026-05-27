@@ -24,19 +24,66 @@ function classifyProduct(details: string): ProductCategory {
 }
 
 function parseDateStr(dateStr: string): { date: string; dayOfWeek: number } {
-  // Formato esperado: DD/MM/YYYY HH:mm o variantes
-  const parts = dateStr.trim().split(' ')[0]; // tomar solo la fecha
-  const [day, month, year] = parts.split('/').map(Number);
+  // Soporta múltiples formatos: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD-MM-YYYY, DD.MM.YYYY
+  const trimmed = dateStr.trim().split(' ')[0]; // tomar solo la fecha (sin hora)
+
+  let day: number, month: number, year: number;
+
+  if (trimmed.includes('/')) {
+    const parts = trimmed.split('/').map(Number);
+    if (parts[2] >= 1000) {
+      // DD/MM/YYYY o MM/DD/YYYY
+      // Si el primer valor > 12, es DD/MM/YYYY seguro
+      if (parts[0] > 12) {
+        [day, month, year] = parts;
+      } else if (parts[1] > 12) {
+        // Segundo valor > 12 → MM/DD/YYYY
+        [month, day, year] = parts;
+      } else {
+        // Ambiguo, asumir DD/MM/YYYY (formato MX)
+        [day, month, year] = parts;
+      }
+    } else if (parts[0] >= 1000) {
+      // YYYY/MM/DD
+      [year, month, day] = parts;
+    } else {
+      [day, month, year] = parts;
+    }
+  } else if (trimmed.includes('-')) {
+    const parts = trimmed.split('-').map(Number);
+    if (parts[0] >= 1000) {
+      [year, month, day] = parts; // YYYY-MM-DD
+    } else {
+      [day, month, year] = parts; // DD-MM-YYYY
+    }
+  } else if (trimmed.includes('.')) {
+    const parts = trimmed.split('.').map(Number);
+    [day, month, year] = parts;
+  } else {
+    // Fallback: intentar Date.parse nativo
+    const fallback = new Date(trimmed);
+    return {
+      date: fallback.toISOString().slice(0, 10),
+      dayOfWeek: fallback.getDay(),
+    };
+  }
+
   const d = new Date(year, month - 1, day);
   const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   return { date: iso, dayOfWeek: d.getDay() };
 }
+
+const EMPLOYEE_SALE_KEYWORDS = ['COLABORADOR', 'COLABORADORES', 'EMPLEADO', 'STAFF', 'CORTESIA', 'COURTESY'];
 
 function isEmployeeSale(customerCode: string, customerName: string, employees: DetailedEmployee[]): boolean {
   if (!customerCode && !customerName) return false;
   const nameUpper = (customerName || '').toUpperCase().trim();
   const codeUpper = (customerCode || '').toUpperCase().trim();
 
+  // Detectar por palabras clave (ej: "COLABORADORES IVANGUADERRAMA")
+  if (EMPLOYEE_SALE_KEYWORDS.some(kw => nameUpper.includes(kw) || codeUpper.includes(kw))) return true;
+
+  // Detectar por nombre de empleado registrado
   return employees.some(emp => {
     const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
     const empNames = emp.nombres.toUpperCase();
