@@ -280,24 +280,23 @@ export const ChecadorPage: React.FC = () => {
             return;
         }
 
+        // Buscar codigo del empleado para matching robusto
+        const matchedEmp = detailedEmployees.find(emp => {
+            const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
+            return authenticatedEmployee.name.toUpperCase().trim() === fullName ||
+                (authenticatedEmployee.name.toUpperCase().includes(emp.paterno.toUpperCase()) &&
+                 authenticatedEmployee.name.toUpperCase().includes(emp.nombres.toUpperCase()));
+        });
+
+        const newLog: LogEntry = {
+            employeeName: authenticatedEmployee.name,
+            employeeCode: matchedEmp?.codigo || '',
+            type,
+            timestamp: 0,
+            location,
+        };
+
         try {
-            // Buscar codigo del empleado para matching robusto
-            const matchedEmp = detailedEmployees.find(emp => {
-                const fullName = `${emp.paterno} ${emp.materno} ${emp.nombres}`.toUpperCase().trim();
-                return authenticatedEmployee.name.toUpperCase().trim() === fullName ||
-                    (authenticatedEmployee.name.toUpperCase().includes(emp.paterno.toUpperCase()) &&
-                     authenticatedEmployee.name.toUpperCase().includes(emp.nombres.toUpperCase()));
-            });
-
-            const newLog: LogEntry = {
-                employeeName: authenticatedEmployee.name,
-                employeeCode: matchedEmp?.codigo || '',
-                type,
-                timestamp: 0, // serverTimestamp() se aplica en la transacción
-                location,
-            };
-
-            // Transacción atómica: valida secuencia + crea log + actualiza estado
             await logsService.createWithValidation(newLog);
             await loadDailyLogs(authenticatedEmployee);
             toast.success(`${logTypeLabels[type] || type} registrado correctamente.`);
@@ -307,7 +306,16 @@ export const ChecadorPage: React.FC = () => {
                 toast.warning(error.message);
                 await loadDailyLogs(authenticatedEmployee);
             } else {
-                toast.error('Error al guardar registro. Intenta de nuevo.');
+                // Último intento: crear log directamente sin transacción
+                try {
+                    await logsService.create({ ...newLog, timestamp: Date.now() });
+                    await loadDailyLogs(authenticatedEmployee);
+                    toast.success(`${logTypeLabels[type] || type} registrado.`);
+                    return;
+                } catch (directErr: any) {
+                    console.error('Fallback directo falló:', directErr);
+                }
+                toast.error(`Error: ${error.message || 'desconocido'}`);
             }
         } finally {
             setIsProcessingLog(false);
