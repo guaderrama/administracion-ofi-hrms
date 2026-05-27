@@ -130,7 +130,7 @@ service cloud.firestore {
     // Payroll Cuts collection (cortes de nomina)
     match /payroll_cuts/{docId} {
       allow read: if isAuthenticated();
-      allow create, delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     // Vacation Requests (solicitudes de vacaciones)

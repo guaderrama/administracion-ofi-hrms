@@ -438,7 +438,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     setSavingCut(true);
     try {
       const { cutEmployees, cutTotals, cleanDaysWorked, cleanNotes } = buildCutData();
-      const cutData = {
+      const baseCutData = {
         startDate: selectedPeriod.startDate,
         endDate: selectedPeriod.endDate,
         quincena: selectedPeriod.quincena,
@@ -446,23 +446,22 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         employees: cutEmployees,
         totals: cutTotals,
         createdBy: user?.email || '',
-        createdAt: new Date(),
-        status: 'borrador' as const,
+        status: 'borrador',
         commissionReportIds: Array.from(selectedCommissionIds),
         daysWorked: cleanDaysWorked,
         employeeNotes: cleanNotes,
-      } as any;
+      };
       if (currentCutId) {
-        await payrollCutsService.update(currentCutId, cutData);
+        await payrollCutsService.update(currentCutId, baseCutData as any);
         toast.success('Borrador actualizado.');
       } else {
-        const id = await payrollCutsService.create(cutData);
+        const id = await payrollCutsService.create({ ...baseCutData, createdAt: new Date() } as any);
         setCurrentCutId(id);
         toast.success('Borrador guardado.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error guardando borrador:', err);
-      toast.error('Error al guardar borrador.');
+      toast.error(`Error: ${err?.message || err?.code || 'desconocido'}`);
     } finally {
       setSavingCut(false);
     }
