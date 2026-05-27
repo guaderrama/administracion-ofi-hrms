@@ -644,9 +644,26 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           console.error('Error bloqueando comisión:', err);
         }
       }
+
+      // Aplicar pagos de préstamos activos
+      for (const emp of employees) {
+        const activeLoans = loansService.getActiveByEmployee(allLoans, emp.codigo);
+        for (const loan of activeLoans) {
+          if (!loan.id) continue;
+          const nextPaymentIdx = loan.payments.findIndex(p => !p.applied);
+          if (nextPaymentIdx >= 0) {
+            try {
+              await loansService.applyPayment(loan.id, loan, nextPaymentIdx, periodLabel);
+            } catch (err) {
+              console.error(`Error aplicando pago préstamo ${loan.id}:`, err);
+            }
+          }
+        }
+      }
+
       setSelectedCommissionIds(new Set());
       setCurrentCutId(null);
-      toast.success('Periodo cerrado exitosamente.');
+      toast.success('Periodo cerrado. Comisiones bloqueadas y préstamos actualizados.');
     } catch (err) {
       console.error('Error cerrando periodo:', err);
       toast.error('Error al cerrar periodo.');
