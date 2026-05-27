@@ -308,19 +308,18 @@ export const logsService = {
       result = await this.create(log);
     }
 
-    // Recomputar AttendanceDay (no bloquea la respuesta)
-    try {
-      const today = toLocalDateKey(Date.now());
-      const dayLogs = await logsService.getByEmployeeAndDate(log.employeeName);
-      await attendanceDaysService.computeAndSave(
-        log.employeeCode || '',
-        log.employeeName,
-        today,
-        dayLogs,
-      );
-    } catch (err) {
-      console.error('Error recomputando AttendanceDay:', err);
-    }
+    // Recomputar AttendanceDay en background (no bloquea al usuario)
+    const empName = log.employeeName;
+    const empCode = log.employeeCode || '';
+    setTimeout(async () => {
+      try {
+        const today = toLocalDateKey(Date.now());
+        const dayLogs = await logsService.getByEmployeeAndDate(empName);
+        await attendanceDaysService.computeAndSave(empCode, empName, today, dayLogs);
+      } catch (err) {
+        console.error('Error recomputando AttendanceDay:', err);
+      }
+    }, 100);
 
     return result;
   },
