@@ -827,7 +827,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           )}
           <div className="flex gap-2">
             <button
-              onClick={handleDownloadPdf}
+              onClick={handleDownloadReport}
               disabled={isGenerating || employees.length === 0}
               className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all"
             >
