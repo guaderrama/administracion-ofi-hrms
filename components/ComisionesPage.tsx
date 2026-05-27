@@ -370,6 +370,12 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
           >
             Nuevo
           </button>
+          <button
+            onClick={() => { handleNewReport(); setActiveTab('upload'); }}
+            className="px-4 py-2 text-sm font-medium text-slate-500 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Cerrar
+          </button>
         </div>
       )}
 
