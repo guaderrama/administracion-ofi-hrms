@@ -6,7 +6,7 @@ interface VacationPdfPreviewProps {
 }
 
 const DetailRow: React.FC<{ label: string; value?: string | number }> = ({ label, value }) => (
-  value || value === 0 ? <p><strong className="font-medium text-gray-800">{label}:</strong> {value}</p> : null
+  value || value === 0 ? <p className="leading-relaxed"><strong className="font-medium text-gray-800">{label}:</strong> {String(value)}</p> : null
 );
 
 const DatesTable: React.FC<{ dates: string[] }> = ({ dates }) => {
@@ -48,7 +48,7 @@ export const VacationPdfPreview: React.FC<VacationPdfPreviewProps> = ({ data }) 
   const formatDate = (dateStr: string) => new Date(dateStr + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
-    <div id="pdf-content-vacation" className="p-8 bg-white text-gray-900 font-sans text-sm max-w-2xl mx-auto border border-gray-300 shadow-lg">
+    <div id="pdf-content-vacation" className="p-8 bg-white text-gray-900 font-sans text-sm max-w-2xl mx-auto border border-gray-300 shadow-lg" style={{ lineHeight: '1.6' }}>
         <header className="text-center mb-8 border-b pb-4">
           <h1 className="font-serif text-3xl text-gray-800">IVAN GUADERRAMA ART</h1>
           <h2 className="text-xl font-light text-gray-600 mt-2">Papeleta de Vacaciones</h2>
@@ -71,10 +71,19 @@ export const VacationPdfPreview: React.FC<VacationPdfPreviewProps> = ({ data }) 
 
         <section className="mb-6">
           <h3 className="text-base font-semibold border-b pb-1 mb-2 text-gray-700">Resumen de Vacaciones</h3>
-          <div className="grid grid-cols-3 gap-4 mt-2">
-              <DetailRow label="Días Correspondientes" value={data.vacationDaysEntitled} />
-              <DetailRow label="Días Solicitados" value={data.daysRequested} />
-              <DetailRow label="Días Pendientes" value={data.daysRemaining} />
+          <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+              <div>
+                <p className="text-xs text-gray-500">Días Correspondientes</p>
+                <p className="text-lg font-bold text-gray-900">{data.vacationDaysEntitled}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Días Solicitados</p>
+                <p className="text-lg font-bold text-gray-900">{data.daysRequested}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Días Pendientes</p>
+                <p className="text-lg font-bold text-gray-900">{data.daysRemaining}</p>
+              </div>
           </div>
         </section>
 

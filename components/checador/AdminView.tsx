@@ -13,8 +13,149 @@ import { employeesService, logsService, permissionsService, cleanDuplicateLogs, 
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../src/contexts/AuthContext';
 
+declare const jspdf: any;
+
 interface AdminViewProps {
   onExit: () => void;
+}
+
+function generateVacationPdf(vr: VacationRequestRecord) {
+  const pdf = new jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const ml = 20;
+  const mr = 20;
+  const cw = pageWidth - ml - mr;
+  let y = 18;
+
+  const fmtDate = (s: string) => new Date(s + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+  const fmtDateShort = (s: string) => {
+    const f = new Date(s + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    return f.charAt(0).toUpperCase() + f.slice(1);
+  };
+  const line = (yy: number) => { pdf.setDrawColor(200, 200, 200); pdf.setLineWidth(0.3); pdf.line(ml, yy, pageWidth - mr, yy); };
+
+  // Header
+  pdf.setFont('times', 'bold'); pdf.setFontSize(20); pdf.setTextColor(30, 41, 59);
+  pdf.text('IVAN GUADERRAMA ART', pageWidth / 2, y, { align: 'center' }); y += 6;
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(12); pdf.setTextColor(100, 116, 139);
+  pdf.text('Papeleta de Vacaciones', pageWidth / 2, y, { align: 'center' }); y += 4;
+  line(y); y += 7;
+
+  // Fecha solicitud
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(30, 41, 59);
+  pdf.text('Fecha de Solicitud: ', ml, y);
+  const lw = pdf.getTextWidth('Fecha de Solicitud: ');
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(fmtDate(vr.createdAt instanceof Date ? vr.createdAt.toISOString().slice(0, 10) : String(vr.createdAt).slice(0, 10)), ml + lw, y);
+  y += 6;
+
+  pdf.setFontSize(9); pdf.setTextColor(55, 65, 81);
+  pdf.text('Por medio de la presente, solicito tomar los siguientes días a cuenta de mis vacaciones correspondientes.', ml, y);
+  y += 7;
+
+  // Datos colaborador
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(55, 65, 81);
+  pdf.text('Datos del Colaborador', ml, y); y += 2; line(y); y += 5;
+  pdf.setFontSize(13); pdf.setTextColor(17, 24, 39);
+  pdf.text(vr.employeeName.toUpperCase(), ml, y); y += 5;
+  pdf.setFontSize(9); pdf.setTextColor(30, 41, 59);
+  pdf.text('Fecha de Ingreso: ', ml, y);
+  const hw = pdf.getTextWidth('Fecha de Ingreso: ');
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(fmtDate(vr.hireDate), ml + hw, y); y += 8;
+
+  // Resumen - compact inline
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(55, 65, 81);
+  pdf.text('Resumen de Vacaciones', ml, y); y += 2; line(y); y += 6;
+  const colW = cw / 3;
+  [
+    { label: 'Días Correspondientes', value: String(vr.daysEntitled) },
+    { label: 'Días Solicitados', value: String(vr.daysRequested) },
+    { label: 'Días Pendientes', value: String(Math.max(0, vr.daysEntitled - vr.daysRequested)) },
+  ].forEach((item, i) => {
+    const cx = ml + colW * i + colW / 2;
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(107, 114, 128);
+    pdf.text(item.label, cx, y, { align: 'center' });
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(14); pdf.setTextColor(17, 24, 39);
+    pdf.text(item.value, cx, y + 6, { align: 'center' });
+  });
+  y += 14;
+
+  // Periodo - 2 column grid
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(55, 65, 81);
+  pdf.text('Período Solicitado', ml, y); y += 2; line(y); y += 5;
+
+  // Table header row
+  pdf.setFillColor(245, 245, 245);
+  const halfW = cw / 2;
+  pdf.rect(ml, y - 2, cw, 6, 'F');
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.setTextColor(75, 85, 99);
+  pdf.text('#', ml + 2, y + 2);
+  pdf.text('Fecha', ml + 8, y + 2);
+  pdf.text('#', ml + halfW + 2, y + 2);
+  pdf.text('Fecha', ml + halfW + 8, y + 2);
+  y += 6; line(y); y += 1;
+
+  // Dates in 2 columns
+  const dates = vr.dates;
+  const rows = Math.ceil(dates.length / 2);
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(55, 65, 81);
+
+  for (let r = 0; r < rows; r++) {
+    y += 4;
+    // Left column
+    const idxL = r;
+    pdf.setFont('helvetica', 'bold'); pdf.setTextColor(150, 150, 150);
+    pdf.text(String(idxL + 1), ml + 2, y);
+    pdf.setFont('helvetica', 'normal'); pdf.setTextColor(55, 65, 81);
+    pdf.text(fmtDateShort(dates[idxL]), ml + 8, y);
+    // Right column
+    const idxR = r + rows;
+    if (idxR < dates.length) {
+      pdf.setFont('helvetica', 'bold'); pdf.setTextColor(150, 150, 150);
+      pdf.text(String(idxR + 1), ml + halfW + 2, y);
+      pdf.setFont('helvetica', 'normal'); pdf.setTextColor(55, 65, 81);
+      pdf.text(fmtDateShort(dates[idxR]), ml + halfW + 8, y);
+    }
+    y += 1.5;
+    pdf.setDrawColor(230, 230, 230); pdf.setLineWidth(0.15);
+    pdf.line(ml, y, pageWidth - mr, y);
+    y += 0.5;
+  }
+  y += 5;
+
+  // Notas
+  if (vr.notes) {
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(55, 65, 81);
+    pdf.text('Comentarios', ml, y); y += 2; line(y); y += 5;
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(55, 65, 81);
+    const nl = pdf.splitTextToSize(vr.notes, cw);
+    nl.forEach((l: string) => { pdf.text(l, ml, y); y += 4; });
+    y += 3;
+  }
+
+  // Disclaimer
+  y += 2;
+  pdf.setFont('helvetica', 'italic'); pdf.setFontSize(7); pdf.setTextColor(140, 140, 140);
+  pdf.text('La presente solicitud está sujeta a la aprobación de la Dirección General y a la disponibilidad operativa del departamento.', pageWidth / 2, y, { align: 'center', maxWidth: cw });
+  y += 10;
+
+  // Firmas
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(55, 65, 81);
+  pdf.text('Firmas de Autorización', pageWidth / 2, y, { align: 'center' }); y += 2; line(y); y += 25;
+  const sigW = cw / 3;
+  ['Firma del Solicitante', 'Dirección General', 'Administración'].forEach((label, i) => {
+    const sx = ml + sigW * i;
+    const sc = sx + sigW / 2;
+    pdf.setDrawColor(156, 163, 175); pdf.setLineWidth(0.4);
+    pdf.line(sx + 5, y, sx + sigW - 5, y);
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(75, 85, 99);
+    pdf.text(label, sc, y + 4, { align: 'center' });
+  });
+
+  const nameParts = vr.employeeName.split(' ');
+  const fileName = `vacaciones_${nameParts[0]}_${nameParts[1] || ''}.pdf`.replace(/\s/g, '_');
+  pdf.save(fileName);
 }
 
 const calculateTenure = (startDateString: string): string => {
@@ -1582,6 +1723,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                                       <button onClick={() => { vacationRequestsService.update(vr.id!, { status: 'rechazada' }); toast.success('Vacacion rechazada.'); }} className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600">Rechazar</button>
                                     </>
                                   )}
+                                  <button
+                                    onClick={() => generateVacationPdf(vr)}
+                                    className="p-1 text-slate-400 hover:text-blue-600 rounded" title="Descargar PDF"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                                  </button>
                                   <button
                                     onClick={() => { setEditingVacation(vr); setEditVacDates(vr.dates.join('\n')); }}
                                     className="p-1 text-slate-400 hover:text-amber-600 rounded" title="Editar fechas"
