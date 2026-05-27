@@ -293,7 +293,7 @@ export const ChecadorPage: React.FC = () => {
             employeeCode: matchedEmp?.codigo || '',
             type,
             timestamp: 0,
-            location,
+            ...(location ? { location } : {}),
         };
 
         try {
