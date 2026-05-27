@@ -392,24 +392,70 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     }
   };
 
-  const handleDownloadReport = async () => {
-    setIsGenerating(true);
+  const handleDownloadReport = () => {
     try {
-      await new Promise(resolve => setTimeout(resolve, 200));
-      const el = document.getElementById('nomina-report-table');
-      if (!el) { toast.error('No se encontró la tabla.'); return; }
-      const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff' });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`reporte_nomina_${selectedPeriod.startDate}_${selectedPeriod.endDate}.pdf`);
-    } catch (err) {
-      console.error('Error generando reporte PDF:', err);
-      toast.error('Error al generar reporte PDF.');
-    } finally {
-      setIsGenerating(false);
+      const hasCommissions = selectedCommissionIds.size > 0;
+      const headers = [
+        'Código', 'Nombre Completo', 'Fecha Ingreso', 'Días Vacaciones',
+        'Aplica Vacaciones', 'Días Trabajados', 'Días Periodo',
+        'Bono Puntualidad', 'Bono Objetivos', 'Apoyo Gasolina',
+        ...(hasCommissions ? ['Com. Caminata', 'Com. Semana'] : []),
+        'Total', 'Nota'
+      ];
+
+      const rows = employees.map(emp => {
+        const days = daysWorked[emp.id] ?? diasEnPeriodo;
+        const salary = calculateSalary(emp, days, diasEnPeriodo);
+        const bd = employeeCommissionBreakdown[emp.codigo];
+        const total = salary.netoAPagar + (employeeCommissions[emp.codigo] || 0);
+        return [
+          emp.codigo,
+          `"${getEmployeeFullName(emp)}"`,
+          emp.fechaIngreso,
+          calculateVacation(emp.fechaIngreso).daysEntitled,
+          calculateVacation(emp.fechaIngreso).eligible ? 'Si' : 'No',
+          days,
+          diasEnPeriodo,
+          salary.bonoPuntualidad.toFixed(2),
+          salary.bonoObjetivos.toFixed(2),
+          salary.apoyoGasolina.toFixed(2),
+          ...(hasCommissions ? [(bd?.caminata || 0).toFixed(2), (bd?.semana || 0).toFixed(2)] : []),
+          total.toFixed(2),
+          `"${employeeNotes[emp.id] || ''}"`,
+        ].join(',');
+      });
+
+      // Totales
+      const totRow = [
+        '', '"TOTALES"', '', '', '', '', '',
+        totals.bonoPuntualidad.toFixed(2),
+        totals.bonoObjetivos.toFixed(2),
+        totals.apoyoGasolina.toFixed(2),
+        ...(hasCommissions ? [
+          Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.caminata, 0).toFixed(2),
+          Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0).toFixed(2),
+        ] : []),
+        (totals.total + Object.values(employeeCommissions).reduce((a, b) => a + b, 0)).toFixed(2),
+        '',
+      ].join(',');
+
+      const title = `"IVAN GUADERRAMA ART - Reporte de Nómina"`;
+      const period = `"${getPeriodLabel(selectedPeriod)}"`;
+      const csvContent = [title, period, '', headers.join(','), ...rows, totRow].join('\n');
+
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `reporte_nomina_${selectedPeriod.startDate}_${selectedPeriod.endDate}.csv`;
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      toast.success('Reporte descargado.');
+    } catch (err: any) {
+      console.error('Error descargando reporte:', err);
+      toast.error(`Error: ${err?.message || 'desconocido'}`);
     }
   };
 
@@ -756,7 +802,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
               disabled={isGenerating || employees.length === 0}
               className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all"
             >
-              Descargar Reporte PDF
+              Descargar Reporte
             </button>
             {canEdit && (
               <button
