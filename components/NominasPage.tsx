@@ -456,11 +456,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           getEmployeeFullName(emp),
           formatDateShort(emp.fechaIngreso),
           `${days}/${diasEnPeriodo}`,
-          `$${salary.bonoPuntualidad.toFixed(2)}`,
-          `$${salary.bonoObjetivos.toFixed(2)}`,
-          `$${salary.apoyoGasolina.toFixed(2)}`,
-          ...(hasComm ? [`$${(bd?.caminata || 0).toFixed(2)}`, `$${(bd?.semana || 0).toFixed(2)}`] : []),
-          `$${total.toFixed(2)}`,
+          formatCurrency(salary.bonoPuntualidad),
+          formatCurrency(salary.bonoObjetivos),
+          formatCurrency(salary.apoyoGasolina),
+          ...(hasComm ? [formatCurrency(bd?.caminata || 0), formatCurrency(bd?.semana || 0)] : []),
+          formatCurrency(total),
         ];
 
         if (y > 190) { pdf.addPage(); y = 15; }
@@ -481,14 +481,14 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       const commTotal = Object.values(employeeCommissions).reduce((a, b) => a + b, 0);
       const totalRow = [
         '', 'TOTALES', '', '',
-        `$${totals.bonoPuntualidad.toFixed(2)}`,
-        `$${totals.bonoObjetivos.toFixed(2)}`,
-        `$${totals.apoyoGasolina.toFixed(2)}`,
+        formatCurrency(totals.bonoPuntualidad),
+        formatCurrency(totals.bonoObjetivos),
+        formatCurrency(totals.apoyoGasolina),
         ...(hasComm ? [
-          `$${Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.caminata, 0).toFixed(2)}`,
-          `$${Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0).toFixed(2)}`,
+          formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.caminata, 0)),
+          formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0)),
         ] : []),
-        `$${(totals.total + commTotal).toFixed(2)}`,
+        formatCurrency(totals.total + commTotal),
       ];
       x = startX + 2;
       totalRow.forEach((cell, i) => {
