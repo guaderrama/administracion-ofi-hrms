@@ -21,7 +21,7 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
-import type { DetailedEmployee, LogEntry, PermissionRequest, IncomeEntry, AttendanceDay, AttendanceDayStatus } from '../../types';
+import type { DetailedEmployee, LogEntry, PermissionRequest, IncomeEntry, AttendanceDay, AttendanceDayStatus, EmployeeLoan } from '../../types';
 import { LogType } from '../../types';
 import { toLocalDateKey } from '../../utils/dateUtils';
 
@@ -1540,6 +1540,79 @@ export const attendanceDaysService = {
         console.error('Error en suscripción de attendance_days:', error);
       }
     );
+  },
+};
+
+// ============================================
+// PRÉSTAMOS A EMPLEADOS (employee_loans)
+// ============================================
+
+const LOANS_COLLECTION = 'employee_loans';
+
+export const loansService = {
+  async create(loan: Omit<EmployeeLoan, 'id' | 'createdAt'>): Promise<string> {
+    const docRef = await addDoc(collection(db, LOANS_COLLECTION), {
+      ...loan,
+      createdAt: serverTimestamp(),
+    });
+    return docRef.id;
+  },
+
+  async update(id: string, data: Partial<EmployeeLoan>): Promise<void> {
+    const { id: _, ...updateData } = data as any;
+    await updateDoc(doc(db, LOANS_COLLECTION, id), {
+      ...updateData,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
+  async delete(id: string): Promise<void> {
+    await deleteDoc(doc(db, LOANS_COLLECTION, id));
+  },
+
+  subscribe(callback: (loans: EmployeeLoan[]) => void): () => void {
+    return onSnapshot(
+      query(collection(db, LOANS_COLLECTION), orderBy('createdAt', 'desc')),
+      (snapshot) => {
+        const loans = snapshot.docs.map(d => ({
+          ...d.data(),
+          id: d.id,
+          createdAt: d.data().createdAt?.toDate?.() || new Date(),
+        })) as EmployeeLoan[];
+        callback(loans);
+      }
+    );
+  },
+
+  // Obtener préstamos activos de un empleado
+  getActiveByEmployee(loans: EmployeeLoan[], employeeCode: string): EmployeeLoan[] {
+    return loans.filter(l => l.employeeCode === employeeCode && l.status === 'aprobado' && l.remainingBalance > 0);
+  },
+
+  // Obtener deducción quincenal pendiente para un empleado
+  getPendingDeduction(loans: EmployeeLoan[], employeeCode: string): number {
+    const active = this.getActiveByEmployee(loans, employeeCode);
+    return active.reduce((total, loan) => {
+      const nextPayment = loan.payments.find(p => !p.applied);
+      return total + (nextPayment?.amount || loan.biweeklyPayment);
+    }, 0);
+  },
+
+  // Marcar un pago como aplicado
+  async applyPayment(loanId: string, loan: EmployeeLoan, quincenaIndex: number, periodLabel: string): Promise<void> {
+    const payments = [...loan.payments];
+    if (payments[quincenaIndex]) {
+      payments[quincenaIndex].applied = true;
+      payments[quincenaIndex].date = new Date().toISOString().slice(0, 10);
+      payments[quincenaIndex].periodLabel = periodLabel;
+    }
+    const paidAmount = payments.filter(p => p.applied).reduce((s, p) => s + p.amount, 0);
+    await this.update(loanId, {
+      payments,
+      paidAmount,
+      remainingBalance: loan.loanAmount - paidAmount,
+      status: paidAmount >= loan.loanAmount ? 'liquidado' : 'aprobado',
+    });
   },
 };
 

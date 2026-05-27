@@ -101,6 +101,40 @@ export interface LoanRequest {
   installments: number; // in bi-weekly periods (quincenas)
 }
 
+// --- Préstamos ---
+
+export type LoanStatus = 'pendiente' | 'aprobado' | 'rechazado' | 'liquidado';
+
+export interface LoanPayment {
+  quincena: number; // 1, 2, 3...
+  periodLabel: string; // "1ra Quincena Junio 2026"
+  amount: number;
+  date?: string; // YYYY-MM-DD cuando se aplicó
+  applied: boolean; // si ya se descontó en nómina
+}
+
+export interface EmployeeLoan {
+  id?: string;
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  loanAmount: number;
+  installments: number;
+  biweeklyPayment: number; // monto quincenal por defecto
+  remainingBalance: number;
+  paidAmount: number;
+  payments: LoanPayment[];
+  status: LoanStatus;
+  requestDate: string;
+  approvedDate?: string;
+  approvedBy?: string;
+  rejectedDate?: string;
+  rejectedBy?: string;
+  notes?: string;
+  createdBy: string;
+  createdAt: any;
+}
+
 // --- Checador Types ---
 
 export interface Location {

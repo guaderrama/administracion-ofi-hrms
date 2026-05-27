@@ -23,6 +23,7 @@ interface NominasPdfPreviewProps {
   comision?: number;
   comisionDesglose?: CommissionBreakdown;
   comisionLabels?: { caminata?: string; semana?: string };
+  deduccionPrestamo?: number;
 }
 
 const MESES = [
@@ -60,7 +61,8 @@ const ReciboSection: React.FC<{
   comision: number;
   comisionDesglose?: CommissionBreakdown;
   comisionLabels?: { caminata?: string; semana?: string };
-}> = ({ employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, copyLabel, comision, comisionDesglose, comisionLabels }) => (
+  deduccionPrestamo: number;
+}> = ({ employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, copyLabel, comision, comisionDesglose, comisionLabels, deduccionPrestamo }) => (
   <div style={{ height: '127mm', padding: '8mm 12mm', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
     {/* Header */}
     <div style={{ textAlign: 'center', borderBottom: '2px solid #92400e', paddingBottom: '6px', marginBottom: '8px' }}>
@@ -151,9 +153,15 @@ const ReciboSection: React.FC<{
             <td style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 'bold' }}>DEDUCCIONES</td>
             <td style={{ padding: '5px 10px', textAlign: 'right', fontSize: '11px' }}></td>
           </tr>
+          {deduccionPrestamo > 0 && (
+            <tr style={s.row}>
+              <td style={{ ...s.label, color: '#991b1b' }}>Descuento Préstamo</td>
+              <td style={{ ...s.value, color: '#991b1b' }}>{formatCurrency(deduccionPrestamo)}</td>
+            </tr>
+          )}
           <tr style={{ backgroundColor: '#fef2f2' }}>
             <td style={{ ...s.label, fontWeight: 'bold' }}>Total Deducciones</td>
-            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '13px' }}>{formatCurrency(salary.totalDeducciones)}</td>
+            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '13px' }}>{formatCurrency(salary.totalDeducciones + deduccionPrestamo)}</td>
           </tr>
         </tbody>
       </table>
@@ -171,7 +179,7 @@ const ReciboSection: React.FC<{
       alignItems: 'center',
     }}>
       <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#92400e' }}>NETO A PAGAR</span>
-      <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#92400e' }}>{formatCurrency(salary.netoAPagar + comision)}</span>
+      <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#92400e' }}>{formatCurrency(salary.netoAPagar + comision - deduccionPrestamo)}</span>
     </div>
 
     {/* Firmas */}
@@ -186,11 +194,11 @@ const ReciboSection: React.FC<{
   </div>
 );
 
-export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados, forPdf = false, comision = 0, comisionDesglose, comisionLabels }) => {
+export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, period, diasTrabajados, forPdf = false, comision = 0, comisionDesglose, comisionLabels, deduccionPrestamo = 0 }) => {
   const diasEnPeriodo = getDaysInQuincena(period);
   const salary = calculateSalary(employee, diasTrabajados, diasEnPeriodo);
   const fullName = getEmployeeFullName(employee);
-  const commonProps = { employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, comision, comisionDesglose, comisionLabels };
+  const commonProps = { employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, comision, comisionDesglose, comisionLabels, deduccionPrestamo };
 
   return (
     <div

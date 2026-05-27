@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
-import { employeesService, logsService, attendanceDaysService, payrollCutsService, commissionsService, vacationRequestsService, permissionsService, type PayrollCut, type SavedCommissionReport, type VacationRequestRecord } from '../src/services/firestoreService';
-import type { PermissionRequest } from '../types';
+import { employeesService, logsService, attendanceDaysService, payrollCutsService, commissionsService, vacationRequestsService, permissionsService, loansService, type PayrollCut, type SavedCommissionReport, type VacationRequestRecord } from '../src/services/firestoreService';
+import type { PermissionRequest, EmployeeLoan } from '../types';
 import { Compensation } from '../types';
 import { useToast } from './ui/Toast';
 import { NominasPdfPreview, type CommissionBreakdown } from './NominasPdfPreview';
@@ -47,6 +47,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
 
   // Comisiones
   const [commissionReports, setCommissionReports] = useState<SavedCommissionReport[]>([]);
+  const [allLoans, setAllLoans] = useState<EmployeeLoan[]>([]);
   const [selectedCommissionIds, setSelectedCommissionIds] = useState<Set<string>>(new Set());
   const draftDaysRef = useRef<Record<string, number> | null>(null); // Saved daysWorked from loaded draft
 
@@ -62,6 +63,11 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
 
   useEffect(() => {
     const unsubscribe = commissionsService.subscribe((reports) => setCommissionReports(reports));
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = loansService.subscribe((loans) => setAllLoans(loans));
     return () => unsubscribe();
   }, []);
 
@@ -193,6 +199,15 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     });
     return totals;
   }, [employeeCommissionBreakdown]);
+
+  // Deducciones por préstamos activos
+  const loanDeductions = useMemo((): Record<string, number> => {
+    const result: Record<string, number> = {};
+    employees.forEach(emp => {
+      result[emp.codigo] = loansService.getPendingDeduction(allLoans, emp.codigo);
+    });
+    return result;
+  }, [allLoans, employees]);
 
   const toggleCommissionReport = (reportId: string) => {
     setSelectedCommissionIds(prev => {
@@ -869,6 +884,9 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                   <th className="text-right py-3 px-2 font-semibold text-amber-700 text-xs">Com. Caminata</th>
                   <th className="text-right py-3 px-2 font-semibold text-green-700 text-xs">Com. Semana</th>
                 </>}
+                {Object.values(loanDeductions).some(v => v > 0) && (
+                  <th className="text-right py-3 px-2 font-semibold text-red-700 text-xs">Préstamo</th>
+                )}
                 <th className="text-right py-3 px-2 font-semibold text-slate-600 text-xs">Total</th>
                 {canEdit && <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Acciones</th>}
               </tr>
@@ -939,8 +957,13 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                         {formatCurrency(employeeCommissionBreakdown[emp.codigo]?.semana || 0)}
                       </td>
                     </>)}
+                    {Object.values(loanDeductions).some(v => v > 0) && (
+                      <td className="py-3 px-2 text-right text-sm text-red-600 font-semibold">
+                        {loanDeductions[emp.codigo] > 0 ? `-${formatCurrency(loanDeductions[emp.codigo])}` : '—'}
+                      </td>
+                    )}
                     <td className="py-3 px-2 text-right font-bold text-amber-800">
-                      {formatCurrency(salary.netoAPagar + (employeeCommissions[emp.codigo] || 0))}
+                      {formatCurrency(salary.netoAPagar + (employeeCommissions[emp.codigo] || 0) - (loanDeductions[emp.codigo] || 0))}
                     </td>
                     {canEdit && (
                       <td className="py-3 px-2 text-center">
@@ -1137,6 +1160,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                     comision={employeeCommissions[selectedEmployee.codigo] || 0}
                     comisionDesglose={employeeCommissionBreakdown[selectedEmployee.codigo]}
                     comisionLabels={commissionLabels}
+                    deduccionPrestamo={loanDeductions[selectedEmployee.codigo] || 0}
                   />
               </div>
             </div>
@@ -1172,6 +1196,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             comision={employeeCommissions[selectedEmployee.codigo] || 0}
             comisionDesglose={employeeCommissionBreakdown[selectedEmployee.codigo]}
             comisionLabels={commissionLabels}
+            deduccionPrestamo={loanDeductions[selectedEmployee.codigo] || 0}
             forPdf
           />
         </div>

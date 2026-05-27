@@ -1,18 +1,75 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { LoanRequestForm } from './LoanRequestForm';
 import { LoanRequestPdfPreview } from './LoanRequestPdfPreview';
-import type { LoanRequest } from '../types';
+import type { LoanRequest, LoanPayment } from '../types';
+import { useAuth } from '../src/contexts/AuthContext';
+import { loansService, employeesService } from '../src/services/firestoreService';
+import { useToast } from './ui/Toast';
+import type { DetailedEmployee } from '../types';
 
 declare const jspdf: any;
 declare const html2canvas: any;
 
 export const LoanRequestPage: React.FC = () => {
+  const { user } = useAuth();
+  const toast = useToast();
   const [loanData, setLoanData] = useState<LoanRequest | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [formKey, setFormKey] = useState<number>(0);
+  const [employees, setEmployees] = useState<DetailedEmployee[]>([]);
+  const [submitted, setSubmitted] = useState(false);
 
-  const handleFormSubmit = (data: LoanRequest) => {
+  useEffect(() => {
+    const unsub = employeesService.subscribe(setEmployees);
+    return () => unsub();
+  }, []);
+
+  const handleFormSubmit = async (data: LoanRequest) => {
     setLoanData(data);
+
+    // Guardar solicitud en Firestore como préstamo pendiente
+    try {
+      const emp = employees.find(e =>
+        e.nombres === data.firstName && e.paterno === data.lastName && e.materno === data.motherLastName
+      );
+      if (!emp) {
+        toast.warning('No se encontró el empleado para vincular la solicitud.');
+        return;
+      }
+
+      const bw = Math.round(data.loanAmount / data.installments * 100) / 100;
+      const payments: LoanPayment[] = [];
+      for (let i = 0; i < data.installments; i++) {
+        const isLast = i === data.installments - 1;
+        payments.push({
+          quincena: i + 1,
+          periodLabel: '',
+          amount: isLast ? Math.round((data.loanAmount - bw * (data.installments - 1)) * 100) / 100 : bw,
+          applied: false,
+        });
+      }
+
+      await loansService.create({
+        employeeId: emp.id,
+        employeeCode: emp.codigo,
+        employeeName: `${emp.paterno} ${emp.materno} ${emp.nombres}`,
+        loanAmount: data.loanAmount,
+        installments: data.installments,
+        biweeklyPayment: bw,
+        remainingBalance: data.loanAmount,
+        paidAmount: 0,
+        payments,
+        status: 'pendiente',
+        requestDate: data.requestDate,
+        notes: '',
+        createdBy: user?.email || '',
+      });
+      setSubmitted(true);
+      toast.success('Solicitud de préstamo enviada. Pendiente de aprobación.');
+    } catch (err: any) {
+      console.error('Error guardando solicitud:', err);
+      toast.error('Error al enviar solicitud.');
+    }
   };
 
   const handleReset = () => {

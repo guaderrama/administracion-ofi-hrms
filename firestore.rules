@@ -64,6 +64,13 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Employee Loans (préstamos a empleados)
+    match /employee_loans/{loanId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
     // Permission Requests collection (solicitudes de permisos)
     match /permission_requests/{requestId} {
       allow read: if isAuthenticated();
