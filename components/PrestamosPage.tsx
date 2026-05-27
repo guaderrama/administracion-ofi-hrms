@@ -71,7 +71,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
           periodLabel: '',
           amount: paymentAmt,
           applied: i < paidCount,
-          date: i < paidCount ? 'anterior al sistema' : undefined,
+          date: i < paidCount ? 'anterior al sistema' : '',
         });
       }
 
@@ -91,7 +91,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
         requestDate: new Date().toISOString().slice(0, 10),
         approvedDate: new Date().toISOString().slice(0, 10),
         approvedBy: user?.email || '',
-        notes: formNotes,
+        notes: formNotes || '',
         createdBy: user?.email || '',
       });
 
