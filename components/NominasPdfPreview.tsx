@@ -44,8 +44,8 @@ function getPaymentDate(period: PayrollPeriod): string {
 }
 
 const s = {
-  label: { padding: '4px 10px', fontSize: '12px', fontWeight: '600' as const },
-  value: { padding: '4px 10px', fontSize: '12px', textAlign: 'right' as const },
+  label: { padding: '3px 8px', fontSize: '10px', fontWeight: '600' as const },
+  value: { padding: '3px 8px', fontSize: '10px', textAlign: 'right' as const },
   row: { borderBottom: '1px solid #e5e5e5' },
 };
 
@@ -63,25 +63,25 @@ const ReciboSection: React.FC<{
   comisionLabels?: { caminata?: string; semana?: string };
   deduccionPrestamo: number;
 }> = ({ employee, period, diasTrabajados, diasEnPeriodo, salary, fullName, copyLabel, comision, comisionDesglose, comisionLabels, deduccionPrestamo }) => (
-  <div style={{ height: '127mm', padding: '8mm 12mm', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+  <div style={{ padding: '5mm 10mm', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
     {/* Header */}
-    <div style={{ textAlign: 'center', borderBottom: '2px solid #92400e', paddingBottom: '6px', marginBottom: '8px' }}>
-      <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0', color: '#92400e', letterSpacing: '1px' }}>
+    <div style={{ textAlign: 'center', borderBottom: '2px solid #92400e', paddingBottom: '4px', marginBottom: '5px' }}>
+      <h1 style={{ fontSize: '15px', fontWeight: 'bold', margin: '0', color: '#92400e', letterSpacing: '1px' }}>
         IVAN GUADERRAMA ART
       </h1>
-      <p style={{ fontSize: '12px', fontWeight: '600', margin: '2px 0 0 0', color: '#78350f' }}>
-        Recibo de Nómina Quincenal — <span style={{ fontSize: '10px', color: '#a3a3a3', fontStyle: 'italic' }}>{copyLabel}</span>
+      <p style={{ fontSize: '10px', fontWeight: '600', margin: '1px 0 0 0', color: '#78350f' }}>
+        Recibo de Nómina Quincenal — <span style={{ fontSize: '8px', color: '#a3a3a3', fontStyle: 'italic' }}>{copyLabel}</span>
       </p>
     </div>
 
     {/* Periodo + Pago */}
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '11px' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '9px' }}>
       <span><strong>Periodo:</strong> {getPeriodLabel(period)}</span>
       <span><strong>Fecha de Pago:</strong> {getPaymentDate(period)}</span>
     </div>
 
     {/* Datos del colaborador */}
-    <div style={{ display: 'flex', gap: '16px', marginBottom: '6px', fontSize: '11px', backgroundColor: '#fefce8', border: '1px solid #d4d4d4', borderRadius: '4px', padding: '6px 10px' }}>
+    <div style={{ display: 'flex', gap: '12px', marginBottom: '4px', fontSize: '9px', backgroundColor: '#fefce8', border: '1px solid #d4d4d4', borderRadius: '3px', padding: '4px 8px' }}>
       <div style={{ flex: 1 }}>
         <div><strong>Código:</strong> {employee.codigo}</div>
         <div><strong>Nombre:</strong> {fullName}</div>
@@ -101,11 +101,11 @@ const ReciboSection: React.FC<{
 
     {/* Percepciones y Deducciones */}
     <div style={{ flex: 1 }}>
-      <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', border: '1px solid #d4d4d4' }}>
+      <table style={{ width: '100%', fontSize: '10px', borderCollapse: 'collapse', border: '1px solid #d4d4d4' }}>
         <thead>
           <tr style={{ backgroundColor: '#166534', color: '#fff' }}>
-            <th style={{ padding: '5px 10px', textAlign: 'left', fontSize: '11px', fontWeight: 'bold' }}>PERCEPCIONES</th>
-            <th style={{ padding: '5px 10px', textAlign: 'right', fontSize: '11px' }}>IMPORTE</th>
+            <th style={{ padding: '3px 8px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold' }}>PERCEPCIONES</th>
+            <th style={{ padding: '3px 8px', textAlign: 'right', fontSize: '9px' }}>IMPORTE</th>
           </tr>
         </thead>
         <tbody>
@@ -147,11 +147,11 @@ const ReciboSection: React.FC<{
           )}
           <tr style={{ backgroundColor: '#f0fdf4', borderBottom: '2px solid #166534' }}>
             <td style={{ ...s.label, fontWeight: 'bold' }}>Total Percepciones</td>
-            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '13px' }}>{formatCurrency(salary.totalPercepciones + comision)}</td>
+            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '11px' }}>{formatCurrency(salary.totalPercepciones + comision)}</td>
           </tr>
           <tr style={{ backgroundColor: '#991b1b', color: '#fff' }}>
-            <td style={{ padding: '5px 10px', fontSize: '11px', fontWeight: 'bold' }}>DEDUCCIONES</td>
-            <td style={{ padding: '5px 10px', textAlign: 'right', fontSize: '11px' }}></td>
+            <td style={{ padding: '3px 8px', fontSize: '9px', fontWeight: 'bold' }}>DEDUCCIONES</td>
+            <td style={{ padding: '3px 8px', textAlign: 'right', fontSize: '11px' }}></td>
           </tr>
           {deduccionPrestamo > 0 && (
             <tr style={s.row}>
@@ -161,7 +161,7 @@ const ReciboSection: React.FC<{
           )}
           <tr style={{ backgroundColor: '#fef2f2' }}>
             <td style={{ ...s.label, fontWeight: 'bold' }}>Total Deducciones</td>
-            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '13px' }}>{formatCurrency(salary.totalDeducciones + deduccionPrestamo)}</td>
+            <td style={{ ...s.value, fontWeight: 'bold', fontSize: '11px' }}>{formatCurrency(salary.totalDeducciones + deduccionPrestamo)}</td>
           </tr>
         </tbody>
       </table>
@@ -170,25 +170,25 @@ const ReciboSection: React.FC<{
     {/* Neto a Pagar */}
     <div style={{
       border: '2px solid #92400e',
-      borderRadius: '4px',
-      padding: '6px 12px',
-      margin: '6px 0',
+      borderRadius: '3px',
+      padding: '4px 10px',
+      margin: '4px 0',
       backgroundColor: '#fffbeb',
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
     }}>
-      <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#92400e' }}>NETO A PAGAR</span>
-      <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#92400e' }}>{formatCurrency(salary.netoAPagar + comision - deduccionPrestamo)}</span>
+      <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#92400e' }}>NETO A PAGAR</span>
+      <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#92400e' }}>{formatCurrency(salary.netoAPagar + comision - deduccionPrestamo)}</span>
     </div>
 
     {/* Firmas */}
-    <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '4px' }}>
-      <div style={{ textAlign: 'center', width: '180px' }}>
-        <div style={{ borderTop: '1px solid #333', paddingTop: '4px', fontSize: '10px' }}>Firma del Colaborador</div>
+    <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '3px' }}>
+      <div style={{ textAlign: 'center', width: '150px' }}>
+        <div style={{ borderTop: '1px solid #333', paddingTop: '3px', fontSize: '8px' }}>Firma del Colaborador</div>
       </div>
-      <div style={{ textAlign: 'center', width: '180px' }}>
-        <div style={{ borderTop: '1px solid #333', paddingTop: '4px', fontSize: '10px' }}>Firma de la Empresa</div>
+      <div style={{ textAlign: 'center', width: '150px' }}>
+        <div style={{ borderTop: '1px solid #333', paddingTop: '3px', fontSize: '8px' }}>Firma de la Empresa</div>
       </div>
     </div>
   </div>
@@ -215,7 +215,7 @@ export const NominasPdfPreview: React.FC<NominasPdfPreviewProps> = ({ employee, 
       <ReciboSection {...commonProps} copyLabel="Copia Empresa" />
 
       {/* Línea de corte */}
-      <div style={{ borderTop: '2px dashed #999', margin: '0 12mm', position: 'relative', height: '25mm', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ borderTop: '2px dashed #999', margin: '0 10mm', position: 'relative', height: '10mm', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <span style={{ backgroundColor: '#fff', padding: '0 12px', fontSize: '9px', color: '#999', letterSpacing: '3px' }}>
           ✂ CORTAR AQUÍ
         </span>
