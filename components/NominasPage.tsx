@@ -423,7 +423,13 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       }),
       { bonoPuntualidad: 0, bonoObjetivos: 0, apoyoGasolina: 0, total: 0 }
     );
-    return { cutEmployees, cutTotals };
+    // Limpiar datos para Firestore (no acepta undefined ni NaN)
+    const cleanDaysWorked: Record<string, number> = {};
+    Object.entries(daysWorked).forEach(([k, v]) => { if (typeof v === 'number' && !isNaN(v)) cleanDaysWorked[k] = v; });
+    const cleanNotes: Record<string, string> = {};
+    Object.entries(employeeNotes).forEach(([k, v]) => { if (v) cleanNotes[k] = v; });
+
+    return { cutEmployees, cutTotals, cleanDaysWorked, cleanNotes };
   };
 
   // Guardar borrador (se puede seguir editando)
@@ -431,7 +437,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     if (employees.length === 0) return;
     setSavingCut(true);
     try {
-      const { cutEmployees, cutTotals } = buildCutData();
+      const { cutEmployees, cutTotals, cleanDaysWorked, cleanNotes } = buildCutData();
       const cutData = {
         startDate: selectedPeriod.startDate,
         endDate: selectedPeriod.endDate,
@@ -442,9 +448,9 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         createdBy: user?.email || '',
         createdAt: new Date(),
         status: 'borrador' as const,
-        commissionReportIds: [...selectedCommissionIds],
-        daysWorked,
-        employeeNotes,
+        commissionReportIds: Array.from(selectedCommissionIds),
+        daysWorked: cleanDaysWorked,
+        employeeNotes: cleanNotes,
       } as any;
       if (currentCutId) {
         await payrollCutsService.update(currentCutId, cutData);
@@ -468,7 +474,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     if (!confirm('¿Cerrar este periodo de nómina? Las comisiones incluidas quedarán bloqueadas y no se podrán modificar.')) return;
     setSavingCut(true);
     try {
-      const { cutEmployees, cutTotals } = buildCutData();
+      const { cutEmployees, cutTotals, cleanDaysWorked, cleanNotes } = buildCutData();
       const cutData = {
         startDate: selectedPeriod.startDate,
         endDate: selectedPeriod.endDate,
@@ -479,9 +485,9 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         createdBy: user?.email || '',
         createdAt: new Date(),
         status: 'cerrado' as const,
-        commissionReportIds: [...selectedCommissionIds],
-        daysWorked,
-        employeeNotes,
+        commissionReportIds: Array.from(selectedCommissionIds),
+        daysWorked: cleanDaysWorked,
+        employeeNotes: cleanNotes,
       } as any;
       if (currentCutId) {
         await payrollCutsService.update(currentCutId, cutData);
