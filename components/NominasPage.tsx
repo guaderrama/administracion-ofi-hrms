@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
 import { employeesService, logsService, attendanceDaysService, payrollCutsService, commissionsService, vacationRequestsService, permissionsService, type PayrollCut, type SavedCommissionReport, type VacationRequestRecord } from '../src/services/firestoreService';
 import type { PermissionRequest } from '../types';
@@ -48,6 +48,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   // Comisiones
   const [commissionReports, setCommissionReports] = useState<SavedCommissionReport[]>([]);
   const [selectedCommissionIds, setSelectedCommissionIds] = useState<Set<string>>(new Set());
+  const draftDaysRef = useRef<Record<string, number> | null>(null); // Saved daysWorked from loaded draft
 
   useEffect(() => {
     const unsubscribe = employeesService.subscribe((emps) => setEmployees(emps));
@@ -161,17 +162,27 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     return result;
   }, [selectedCommissionIds, commissionReports]);
 
-  // Labels de las comisiones (nombres de los reportes por tipo)
+  // Labels de las comisiones (nombres de todos los reportes por tipo)
   const commissionLabels = useMemo((): { caminata?: string; semana?: string } => {
-    const labels: { caminata?: string; semana?: string } = {};
+    const caminataNames: string[] = [];
+    const semanaNames: string[] = [];
     selectedCommissionIds.forEach(reportId => {
       const report = commissionReports.find(r => r.id === reportId);
       if (!report) return;
-      const isCaminata = (report.name || '').toLowerCase().includes('caminata');
-      if (isCaminata) labels.caminata = report.name;
-      else labels.semana = report.name;
+      // Detectar por desglose guardado, no solo por nombre
+      const hasJueves = (report as any).employeeCommissionBreakdown &&
+        Object.values((report as any).employeeCommissionBreakdown).some((b: any) => b.caminata > 0);
+      const hasSemana = (report as any).employeeCommissionBreakdown &&
+        Object.values((report as any).employeeCommissionBreakdown).some((b: any) => b.semana > 0);
+      const isCaminata = hasJueves || (report.name || '').toLowerCase().includes('caminata');
+      const isSemana = hasSemana || !isCaminata;
+      if (isCaminata) caminataNames.push(report.name);
+      if (isSemana) semanaNames.push(report.name);
     });
-    return labels;
+    return {
+      caminata: caminataNames.length > 0 ? caminataNames.join(' + ') : undefined,
+      semana: semanaNames.length > 0 ? semanaNames.join(' + ') : undefined,
+    };
   }, [selectedCommissionIds, commissionReports]);
 
   // Versión simple para compatibilidad (solo totales)
@@ -299,15 +310,26 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           updated[emp.id] = Math.min(workedDays.size, diasEnPeriodo);
         });
 
-        setDaysWorked(updated);
         setOriginalDays(updated);
+        // If a draft was loaded, use its saved daysWorked instead of recalculated
+        if (draftDaysRef.current) {
+          setDaysWorked(draftDaysRef.current);
+          draftDaysRef.current = null;
+        } else {
+          setDaysWorked(updated);
+        }
         setAttendanceError(null);
       } catch (error) {
         console.error('Error cargando asistencia:', error);
-        const fallback: Record<string, number> = {};
-        employees.forEach((emp) => { fallback[emp.id] = 0; });
-        setDaysWorked(fallback);
-        setAttendanceError('Error al cargar asistencia. Los días trabajados se muestran como 0. Recarga la página.');
+        if (draftDaysRef.current) {
+          setDaysWorked(draftDaysRef.current);
+          draftDaysRef.current = null;
+        } else {
+          const fallback: Record<string, number> = {};
+          employees.forEach((emp) => { fallback[emp.id] = 0; });
+          setDaysWorked(fallback);
+          setAttendanceError('Error al cargar asistencia. Los días trabajados se muestran como 0. Recarga la página.');
+        }
       } finally {
         setLoadingAttendance(false);
       }
@@ -365,6 +387,27 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       await generatePdf(selectedEmployee);
     } catch (error) {
       console.error('Error generating PDF:', error);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDownloadReport = async () => {
+    setIsGenerating(true);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const el = document.getElementById('nomina-report-table');
+      if (!el) { toast.error('No se encontró la tabla.'); return; }
+      const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff' });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`reporte_nomina_${selectedPeriod.startDate}_${selectedPeriod.endDate}.pdf`);
+    } catch (err) {
+      console.error('Error generando reporte PDF:', err);
+      toast.error('Error al generar reporte PDF.');
     } finally {
       setIsGenerating(false);
     }
@@ -517,6 +560,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const handleLoadDraft = (cut: PayrollCut) => {
     if (cut.status === 'cerrado') return;
     setCurrentCutId(cut.id || null);
+    // Store draft daysWorked so the attendance effect doesn't overwrite them
+    if (cut.daysWorked) draftDaysRef.current = cut.daysWorked;
     setSelectedPeriod({ startDate: cut.startDate, endDate: cut.endDate, quincena: cut.quincena as 1 | 2 });
     if (cut.daysWorked) setDaysWorked(cut.daysWorked);
     if (cut.commissionReportIds) setSelectedCommissionIds(new Set(cut.commissionReportIds));
@@ -705,20 +750,34 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
               <strong>Error:</strong> {attendanceError}
             </div>
           )}
-          {canEdit && (
+          <div className="flex gap-2">
             <button
-              onClick={handleGenerateAll}
+              onClick={handleDownloadPdf}
               disabled={isGenerating || employees.length === 0}
-              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-medium hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg text-sm font-medium hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all"
             >
-              {isGenerating && generatingProgress.total > 0
-                ? `Generando ${generatingProgress.current} de ${generatingProgress.total}...`
-                : 'Generar Todos los Recibos'}
+              Descargar Reporte PDF
             </button>
-          )}
+            {canEdit && (
+              <button
+                onClick={handleGenerateAll}
+                disabled={isGenerating || employees.length === 0}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-medium hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {isGenerating && generatingProgress.total > 0
+                  ? `Generando ${generatingProgress.current} de ${generatingProgress.total}...`
+                  : 'Generar Todos los Recibos'}
+              </button>
+            )}
+          </div>
+          {/* placeholder removed */}
         </div>
 
-        <div className="overflow-x-auto">
+        <div id="nomina-report-table" className="overflow-x-auto bg-white p-4 rounded-lg">
+          <div className="text-center mb-4">
+            <h2 className="font-serif text-xl font-bold text-slate-900">IVAN GUADERRAMA ART</h2>
+            <p className="text-sm text-slate-600">Reporte de Nómina — {getPeriodLabel(selectedPeriod)}</p>
+          </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b-2 border-slate-200">
