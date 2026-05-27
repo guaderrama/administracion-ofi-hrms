@@ -272,6 +272,23 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
                   </>
                 ) : (
                   <>
+                    {loan.payments.some(p => !p.applied) && (
+                      <button onClick={async () => {
+                        if (!loan.id) return;
+                        const nextIdx = loan.payments.findIndex(p => !p.applied);
+                        if (nextIdx < 0) return;
+                        const periodo = prompt('¿En qué periodo se aplicó este pago?', `Quincena ${new Date().toLocaleDateString('es-MX')}`);
+                        if (!periodo) return;
+                        try {
+                          await loansService.applyPayment(loan.id, loan, nextIdx, periodo);
+                          toast.success(`Pago #${nextIdx + 1} aplicado.`);
+                        } catch (err: any) {
+                          toast.error(`Error: ${err.message}`);
+                        }
+                      }} className="px-3 py-1 text-xs font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700">
+                        Aplicar Pago #{loan.payments.findIndex(p => !p.applied) + 1}
+                      </button>
+                    )}
                     <button onClick={() => setEditingLoan({ ...loan })} className="px-3 py-1 text-xs font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200">
                       Editar Pagos
                     </button>

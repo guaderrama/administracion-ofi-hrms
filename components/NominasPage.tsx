@@ -1132,6 +1132,29 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                               >
                                 {cut.status === 'cerrado' ? 'Ver' : 'Cargar'}
                               </button>
+                              {cut.status === 'cerrado' && (
+                                <button
+                                  onClick={async () => {
+                                    if (!cut.id) return;
+                                    if (!confirm('¿Reabrir este periodo? Podrás editarlo y volverlo a cerrar.')) return;
+                                    try {
+                                      await payrollCutsService.update(cut.id, { status: 'borrador' });
+                                      // Desbloquear comisiones asociadas
+                                      if ((cut as any).commissionReportIds) {
+                                        for (const reportId of (cut as any).commissionReportIds) {
+                                          try { await commissionsService.update(reportId, { lockedByPayroll: '' }); } catch {}
+                                        }
+                                      }
+                                      toast.success('Periodo reabierto. Puedes editarlo y volver a cerrarlo.');
+                                    } catch (err: any) {
+                                      toast.error(`Error: ${err.message}`);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-800 rounded-md text-xs font-medium hover:bg-amber-200 transition-colors"
+                                >
+                                  Reabrir
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleDownloadExcel(cut)}
                                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 rounded-md text-xs font-medium hover:bg-green-200 transition-colors"
