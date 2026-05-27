@@ -249,14 +249,20 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
                 {editingLoan?.id === loan.id ? (
                   <>
                     <button onClick={async () => {
-                      if (!loan.id) return;
-                      for (let i = 0; i < editingLoan.payments.length; i++) {
-                        if (editingLoan.payments[i].amount !== loan.payments[i].amount) {
-                          await handleUpdatePaymentAmount(loan, i, editingLoan.payments[i].amount);
-                        }
+                      if (!loan.id || !editingLoan) return;
+                      try {
+                        const payments = editingLoan.payments;
+                        const paidAmount = payments.filter(p => p.applied).reduce((s, p) => s + p.amount, 0);
+                        await loansService.update(loan.id, {
+                          payments,
+                          paidAmount,
+                          remainingBalance: loan.loanAmount - paidAmount,
+                        });
+                        setEditingLoan(null);
+                        toast.success('Pagos actualizados.');
+                      } catch (err: any) {
+                        toast.error(`Error: ${err.message}`);
                       }
-                      setEditingLoan(null);
-                      toast.success('Pagos actualizados.');
                     }} className="px-3 py-1 text-xs font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700">
                       Guardar Cambios
                     </button>
