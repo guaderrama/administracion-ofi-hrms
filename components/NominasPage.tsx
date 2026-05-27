@@ -425,9 +425,15 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       y += 8;
 
       // Headers
+      const hasLoans = Object.values(loanDeductions).some(v => v > 0);
       const cols = ['Código', 'Nombre', 'Ingreso', 'Días', 'B.Punt.', 'B.Obj.', 'Ap.Gas.',
-        ...(hasComm ? ['Com.Cam.', 'Com.Sem.'] : []), 'Total'];
-      const colW = hasComm ? [18, 52, 22, 12, 20, 20, 20, 20, 20, 22] : [20, 60, 25, 14, 24, 24, 24, 26];
+        ...(hasComm ? ['Com.Cam.', 'Com.Sem.'] : []),
+        ...(hasLoans ? ['Préstamo'] : []),
+        'Neto'];
+      const baseW = hasComm
+        ? (hasLoans ? [16, 46, 20, 12, 18, 18, 18, 18, 18, 18, 22] : [18, 52, 22, 12, 20, 20, 20, 20, 20, 22])
+        : (hasLoans ? [18, 54, 22, 14, 22, 22, 22, 20, 24] : [20, 60, 25, 14, 24, 24, 24, 26]);
+      const colW = baseW;
       const startX = 8;
 
       pdf.setFillColor(245, 158, 11);
@@ -460,7 +466,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           formatCurrency(salary.bonoObjetivos),
           formatCurrency(salary.apoyoGasolina),
           ...(hasComm ? [formatCurrency(bd?.caminata || 0), formatCurrency(bd?.semana || 0)] : []),
-          formatCurrency(total),
+          ...(hasLoans ? [loanDeductions[emp.codigo] > 0 ? `-${formatCurrency(loanDeductions[emp.codigo])}` : '—'] : []),
+          formatCurrency(total - (loanDeductions[emp.codigo] || 0)),
         ];
 
         if (y > 190) { pdf.addPage(); y = 15; }
@@ -488,7 +495,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.caminata, 0)),
           formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0)),
         ] : []),
-        formatCurrency(totals.total + commTotal),
+        ...(hasLoans ? [`-${formatCurrency(Object.values(loanDeductions).reduce((a, b) => a + b, 0))}`] : []),
+        formatCurrency(totals.total + commTotal - Object.values(loanDeductions).reduce((a, b) => a + b, 0)),
       ];
       x = startX + 2;
       totalRow.forEach((cell, i) => {
