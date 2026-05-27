@@ -394,67 +394,97 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
 
   const handleDownloadReport = () => {
     try {
-      const hasCommissions = selectedCommissionIds.size > 0;
-      const headers = [
-        'Código', 'Nombre Completo', 'Fecha Ingreso', 'Días Vacaciones',
-        'Aplica Vacaciones', 'Días Trabajados', 'Días Periodo',
-        'Bono Puntualidad', 'Bono Objetivos', 'Apoyo Gasolina',
-        ...(hasCommissions ? ['Com. Caminata', 'Com. Semana'] : []),
-        'Total', 'Nota'
-      ];
+      const hasComm = selectedCommissionIds.size > 0;
+      const pdf = new jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      let y = 15;
 
-      const rows = employees.map(emp => {
+      // Título
+      pdf.setFontSize(16);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('IVAN GUADERRAMA ART', pageW / 2, y, { align: 'center' });
+      y += 6;
+      pdf.setFontSize(10);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(`Reporte de Nómina — ${getPeriodLabel(selectedPeriod)}`, pageW / 2, y, { align: 'center' });
+      y += 8;
+
+      // Headers
+      const cols = ['Código', 'Nombre', 'Ingreso', 'Días', 'B.Punt.', 'B.Obj.', 'Ap.Gas.',
+        ...(hasComm ? ['Com.Cam.', 'Com.Sem.'] : []), 'Total'];
+      const colW = hasComm ? [18, 52, 22, 12, 20, 20, 20, 20, 20, 22] : [20, 60, 25, 14, 24, 24, 24, 26];
+      const startX = 8;
+
+      pdf.setFillColor(245, 158, 11);
+      pdf.rect(startX, y - 4, pageW - 16, 6, 'F');
+      pdf.setFontSize(7);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(255, 255, 255);
+      let x = startX + 2;
+      cols.forEach((col, i) => {
+        pdf.text(col, x, y, { align: 'left' });
+        x += colW[i];
+      });
+      y += 4;
+      pdf.setTextColor(0, 0, 0);
+
+      // Filas
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7);
+      employees.forEach(emp => {
         const days = daysWorked[emp.id] ?? diasEnPeriodo;
         const salary = calculateSalary(emp, days, diasEnPeriodo);
         const bd = employeeCommissionBreakdown[emp.codigo];
         const total = salary.netoAPagar + (employeeCommissions[emp.codigo] || 0);
-        return [
+        const row = [
           emp.codigo,
-          `"${getEmployeeFullName(emp)}"`,
-          emp.fechaIngreso,
-          calculateVacation(emp.fechaIngreso).daysEntitled,
-          calculateVacation(emp.fechaIngreso).eligible ? 'Si' : 'No',
-          days,
-          diasEnPeriodo,
-          salary.bonoPuntualidad.toFixed(2),
-          salary.bonoObjetivos.toFixed(2),
-          salary.apoyoGasolina.toFixed(2),
-          ...(hasCommissions ? [(bd?.caminata || 0).toFixed(2), (bd?.semana || 0).toFixed(2)] : []),
-          total.toFixed(2),
-          `"${employeeNotes[emp.id] || ''}"`,
-        ].join(',');
+          getEmployeeFullName(emp),
+          formatDateShort(emp.fechaIngreso),
+          `${days}/${diasEnPeriodo}`,
+          `$${salary.bonoPuntualidad.toFixed(2)}`,
+          `$${salary.bonoObjetivos.toFixed(2)}`,
+          `$${salary.apoyoGasolina.toFixed(2)}`,
+          ...(hasComm ? [`$${(bd?.caminata || 0).toFixed(2)}`, `$${(bd?.semana || 0).toFixed(2)}`] : []),
+          `$${total.toFixed(2)}`,
+        ];
+
+        if (y > 190) { pdf.addPage(); y = 15; }
+
+        x = startX + 2;
+        row.forEach((cell, i) => {
+          pdf.text(String(cell), x, y);
+          x += colW[i];
+        });
+        y += 5;
       });
 
       // Totales
-      const totRow = [
-        '', '"TOTALES"', '', '', '', '', '',
-        totals.bonoPuntualidad.toFixed(2),
-        totals.bonoObjetivos.toFixed(2),
-        totals.apoyoGasolina.toFixed(2),
-        ...(hasCommissions ? [
-          Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.caminata, 0).toFixed(2),
-          Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0).toFixed(2),
+      y += 2;
+      pdf.setDrawColor(150, 150, 150);
+      pdf.line(startX, y - 3, pageW - 8, y - 3);
+      pdf.setFont('helvetica', 'bold');
+      const commTotal = Object.values(employeeCommissions).reduce((a, b) => a + b, 0);
+      const totalRow = [
+        '', 'TOTALES', '', '',
+        `$${totals.bonoPuntualidad.toFixed(2)}`,
+        `$${totals.bonoObjetivos.toFixed(2)}`,
+        `$${totals.apoyoGasolina.toFixed(2)}`,
+        ...(hasComm ? [
+          `$${Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.caminata, 0).toFixed(2)}`,
+          `$${Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0).toFixed(2)}`,
         ] : []),
-        (totals.total + Object.values(employeeCommissions).reduce((a, b) => a + b, 0)).toFixed(2),
-        '',
-      ].join(',');
+        `$${(totals.total + commTotal).toFixed(2)}`,
+      ];
+      x = startX + 2;
+      totalRow.forEach((cell, i) => {
+        pdf.text(String(cell), x, y);
+        x += colW[i];
+      });
 
-      const title = `"IVAN GUADERRAMA ART - Reporte de Nómina"`;
-      const period = `"${getPeriodLabel(selectedPeriod)}"`;
-      const csvContent = [title, period, '', headers.join(','), ...rows, totRow].join('\n');
-
-      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `reporte_nomina_${selectedPeriod.startDate}_${selectedPeriod.endDate}.csv`;
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
-      toast.success('Reporte descargado.');
+      pdf.save(`reporte_nomina_${selectedPeriod.startDate}_${selectedPeriod.endDate}.pdf`);
+      toast.success('Reporte PDF descargado.');
     } catch (err: any) {
-      console.error('Error descargando reporte:', err);
+      console.error('Error generando reporte:', err);
       toast.error(`Error: ${err?.message || 'desconocido'}`);
     }
   };
@@ -604,14 +634,13 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
 
   // Cargar borrador guardado
   const handleLoadDraft = (cut: PayrollCut) => {
-    if (cut.status === 'cerrado') return;
     setCurrentCutId(cut.id || null);
-    // Store draft daysWorked so the attendance effect doesn't overwrite them
     if (cut.daysWorked) draftDaysRef.current = cut.daysWorked;
     setSelectedPeriod({ startDate: cut.startDate, endDate: cut.endDate, quincena: cut.quincena as 1 | 2 });
     if (cut.daysWorked) setDaysWorked(cut.daysWorked);
     if (cut.commissionReportIds) setSelectedCommissionIds(new Set(cut.commissionReportIds));
     if ((cut as any).employeeNotes) setEmployeeNotes((cut as any).employeeNotes);
+    toast.success(`Corte "${cut.periodLabel}" cargado.`);
   };
 
   // Descargar corte como Excel CSV
@@ -1040,14 +1069,12 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                           </td>
                           <td className="py-2.5 px-3 text-center">
                             <div className="flex gap-1 justify-center">
-                              {cut.status !== 'cerrado' && (
-                                <button
-                                  onClick={() => handleLoadDraft(cut)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-800 rounded-md text-xs font-medium hover:bg-blue-200 transition-colors"
-                                >
-                                  Cargar
-                                </button>
-                              )}
+                              <button
+                                onClick={() => handleLoadDraft(cut)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-800 rounded-md text-xs font-medium hover:bg-blue-200 transition-colors"
+                              >
+                                {cut.status === 'cerrado' ? 'Ver' : 'Cargar'}
+                              </button>
                               <button
                                 onClick={() => handleDownloadExcel(cut)}
                                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 rounded-md text-xs font-medium hover:bg-green-200 transition-colors"
