@@ -3,6 +3,7 @@ import { useAuth } from '../src/contexts/AuthContext';
 import { employeesService, logsService, attendanceDaysService, payrollCutsService, commissionsService, vacationRequestsService, permissionsService, type PayrollCut, type SavedCommissionReport, type VacationRequestRecord } from '../src/services/firestoreService';
 import type { PermissionRequest } from '../types';
 import { Compensation } from '../types';
+import { useToast } from './ui/Toast';
 import { NominasPdfPreview, type CommissionBreakdown } from './NominasPdfPreview';
 import {
   PayrollPeriod,
@@ -31,6 +32,7 @@ interface NominasPageProps {
 
 export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const { isAdmin, canViewAll, canEdit, user } = useAuth();
+  const toast = useToast();
   const [employees, setEmployees] = useState<DetailedEmployee[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState<PayrollPeriod>(getCurrentPeriod());
   const [selectedEmployee, setSelectedEmployee] = useState<DetailedEmployee | null>(null);
@@ -446,10 +448,15 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       } as any;
       if (currentCutId) {
         await payrollCutsService.update(currentCutId, cutData);
+        toast.success('Borrador actualizado.');
       } else {
         const id = await payrollCutsService.create(cutData);
         setCurrentCutId(id);
+        toast.success('Borrador guardado.');
       }
+    } catch (err) {
+      console.error('Error guardando borrador:', err);
+      toast.error('Error al guardar borrador.');
     } finally {
       setSavingCut(false);
     }
@@ -492,6 +499,10 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       }
       setSelectedCommissionIds(new Set());
       setCurrentCutId(null);
+      toast.success('Periodo cerrado exitosamente.');
+    } catch (err) {
+      console.error('Error cerrando periodo:', err);
+      toast.error('Error al cerrar periodo.');
     } finally {
       setSavingCut(false);
     }
