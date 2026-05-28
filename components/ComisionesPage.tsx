@@ -194,6 +194,12 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
   };
 
   // Nuevo reporte (limpiar todo)
+  const isCurrentReportLocked = useMemo(() => {
+    if (!currentReportId) return false;
+    const report = savedReports.find(r => r.id === currentReportId);
+    return !!report?.lockedByPayroll;
+  }, [currentReportId, savedReports]);
+
   const handleNewReport = () => {
     setSales([]);
     setCurrentReportId(null);
@@ -334,6 +340,7 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
   }, [semanaVentas, settings]);
 
   const handleSettingChange = (key: keyof CommissionSettings, value: string) => {
+    if (isCurrentReportLocked) return;
     setSettings(prev => ({ ...prev, [key]: parseFloat(value) || 0 }));
   };
 
@@ -353,17 +360,22 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
           <input
             type="text"
             value={reportName}
-            onChange={e => setReportName(e.target.value)}
+            onChange={e => !isCurrentReportLocked && setReportName(e.target.value)}
+            readOnly={isCurrentReportLocked}
             placeholder="Nombre del reporte (ej: Semana 21 Mayo)"
-            className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-400"
+            className={`flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 ${isCurrentReportLocked ? 'bg-slate-100 cursor-not-allowed' : 'bg-white'}`}
           />
-          <button
-            onClick={handleSaveReport}
-            disabled={isSaving}
-            className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-emerald-600 to-green-600 rounded-lg hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 transition-colors"
-          >
-            {isSaving ? 'Guardando...' : currentReportId ? 'Actualizar' : 'Guardar'}
-          </button>
+          {isCurrentReportLocked ? (
+            <span className="px-4 py-2 text-sm font-medium text-slate-500 bg-slate-200 rounded-lg">🔒 Bloqueado en nómina</span>
+          ) : (
+            <button
+              onClick={handleSaveReport}
+              disabled={isSaving}
+              className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-emerald-600 to-green-600 rounded-lg hover:from-emerald-700 hover:to-green-700 disabled:opacity-50 transition-colors"
+            >
+              {isSaving ? 'Guardando...' : currentReportId ? 'Actualizar' : 'Guardar'}
+            </button>
+          )}
           <button
             onClick={handleNewReport}
             className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
@@ -643,10 +655,12 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
                         <select
                           value={presentMap[employees.find(e => e.codigo === emp.employeeCode)?.id || ''] ? 'si' : 'no'}
                           onChange={(e) => {
+                            if (isCurrentReportLocked) return;
                             const empId = employees.find(em => em.codigo === emp.employeeCode)?.id;
                             if (empId) setPresentMap(prev => ({ ...prev, [empId]: e.target.value === 'si' }));
                           }}
-                          className="px-2 py-1 border border-slate-300 rounded text-sm bg-white"
+                          disabled={isCurrentReportLocked}
+                          className={`px-2 py-1 border border-slate-300 rounded text-sm ${isCurrentReportLocked ? 'bg-slate-100 cursor-not-allowed' : 'bg-white'}`}
                         >
                           <option value="si">Presente</option>
                           <option value="no">Ausente</option>
