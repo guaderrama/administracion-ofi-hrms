@@ -260,26 +260,62 @@ const formatMinutes = (minutes: number): string => {
     return parts.join(' ');
 };
 
-const calculateMinutesToCompensate = (req: PermissionRequest): number => {
-    const { permissionType, arrivalTime, departureTime, absenceStartTime, absenceEndTime, daysCount } = req;
-    
-    const WORKDAY_START_MINUTES = 9 * 60; // 09:00
-    const WORKDAY_END_MINUTES = 18 * 60;   // 18:00
-    const WORKDAY_DURATION_MINUTES = 8 * 60; // 8 hours
+const getScheduleInfoForDate = (emp: DetailedEmployee | undefined, dateStr?: string): { startMin: number; endMin: number; durationMin: number } => {
+    const DEFAULT = { startMin: 9 * 60, endMin: 18 * 60, durationMin: 8 * 60 };
+    if (!emp || !dateStr) return DEFAULT;
+
+    const d = new Date(dateStr + 'T12:00:00');
+    const day = d.getDay();
+    if (day === 0) return { startMin: 0, endMin: 0, durationMin: 0 };
+
+    let schedule = emp.horarioLunesMiercolesViernes || '09:00-18:00';
+    if (day === 4) schedule = emp.horarioJueves || schedule;
+    if (day === 6) schedule = emp.horarioSabado || schedule;
+
+    if (schedule.toLowerCase().includes('no labora')) return { startMin: 0, endMin: 0, durationMin: 0 };
+
+    const parts = schedule.split('-').map(s => s.trim());
+    if (parts.length < 2) return DEFAULT;
+    const [sh, sm] = parts[0].split(':').map(Number);
+    const [eh, em] = parts[1].split(':').map(Number);
+    if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return DEFAULT;
+
+    const startMin = sh * 60 + sm;
+    const endMin = eh * 60 + em;
+    let durationMin = endMin - startMin;
+    if (durationMin >= 420) durationMin -= 60;
+    return { startMin, endMin, durationMin: Math.max(durationMin, 0) };
+};
+
+const calculateMinutesToCompensate = (req: PermissionRequest, emp?: DetailedEmployee): number => {
+    const { permissionType, arrivalTime, departureTime, absenceStartTime, absenceEndTime } = req;
 
     switch (permissionType) {
-        case PermissionType.FULL_DAYS:
-            return (daysCount || 0) * WORKDAY_DURATION_MINUTES;
-        case PermissionType.LATE_ARRIVAL:
+        case PermissionType.FULL_DAYS: {
+            if (req.dates && req.dates.length > 0) {
+                return req.dates.reduce((total, dateStr) => {
+                    const info = getScheduleInfoForDate(emp, dateStr);
+                    return total + info.durationMin;
+                }, 0);
+            }
+            const fallbackInfo = getScheduleInfoForDate(emp, req.permissionDate);
+            return (req.daysCount || 0) * fallbackInfo.durationMin;
+        }
+        case PermissionType.LATE_ARRIVAL: {
+            const info = getScheduleInfoForDate(emp, req.permissionDate);
             const arrival = timeToMinutes(arrivalTime);
-            return arrival > WORKDAY_START_MINUTES ? arrival - WORKDAY_START_MINUTES : 0;
-        case PermissionType.EARLY_DEPARTURE:
+            return arrival > info.startMin ? arrival - info.startMin : 0;
+        }
+        case PermissionType.EARLY_DEPARTURE: {
+            const info = getScheduleInfoForDate(emp, req.permissionDate);
             const departure = timeToMinutes(departureTime);
-            return departure < WORKDAY_END_MINUTES ? WORKDAY_END_MINUTES - departure : 0;
-        case PermissionType.PARTIAL_ABSENCE:
+            return departure < info.endMin ? info.endMin - departure : 0;
+        }
+        case PermissionType.PARTIAL_ABSENCE: {
             const start = timeToMinutes(absenceStartTime);
             const end = timeToMinutes(absenceEndTime);
             return end > start ? end - start : 0;
+        }
         default:
             return 0;
     }
@@ -370,7 +406,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
   // Estado para gestion de retardos
   const [tardinessAdjustments, setTardinessAdjustments] = useState<TardinessAdjustment[]>([]);
-  const [editingTardiness, setEditingTardiness] = useState<{key: string; minutes: number; sanction: boolean; reason: string} | null>(null);
+  const [editingTardiness, setEditingTardiness] = useState<{key: string; minutes: number; sanction: boolean; reason: string; isAuthorized: boolean} | null>(null);
   const [tardinessStartDate, setTardinessStartDate] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 15);
     return d.toISOString().slice(0, 10);
@@ -435,24 +471,23 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
 
     permissionRequests.forEach(req => {
         if (req.compensation === Compensation.EXTRA_TIME) {
-            // Construct the name key in the same format as EMPLOYEES list (PATERNO MATERNO NOMBRES)
             const employeeFullName = `${req.lastName} ${req.motherLastName} ${req.firstName}`.toUpperCase().replace(/\s+/g, ' ').trim();
-            const minutesToCompensate = calculateMinutesToCompensate(req);
-            
+            const detailedEmp = findDetailedEmployee(employeeFullName, detailedEmployees);
+            const minutesToCompensate = calculateMinutesToCompensate(req, detailedEmp);
+
             if (!owedByEmployee[employeeFullName]) {
                 owedByEmployee[employeeFullName] = 0;
             }
             owedByEmployee[employeeFullName] += minutesToCompensate;
         }
     });
-    
-    // Convert minutes to hours for display
+
     for (const empName in owedByEmployee) {
         owedByEmployee[empName] = owedByEmployee[empName] / 60;
     }
 
     return owedByEmployee;
-  }, [permissionRequests]);
+  }, [permissionRequests, detailedEmployees]);
 
   const filteredLogs = useMemo(() => {
     const start = new Date(startDate).setHours(0, 0, 0, 0);
@@ -1122,7 +1157,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         employeeName: editingLog.employeeName,
         type: editingLog.type,
         timestamp: newTimestamp,
-        location: editingLog.location,
+        ...(editingLog.location ? { location: editingLog.location } : {}),
       });
 
       toast.success('Registro actualizado exitosamente.');
@@ -1285,8 +1320,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         employeeName,
         date,
         originalMinutesLate: originalMinutes,
-        adjustedMinutesLate: editingTardiness.minutes,
-        hasSanction: editingTardiness.sanction,
+        adjustedMinutesLate: editingTardiness.isAuthorized ? 0 : editingTardiness.minutes,
+        hasSanction: editingTardiness.isAuthorized ? false : editingTardiness.sanction,
+        isAuthorized: editingTardiness.isAuthorized,
         reason: editingTardiness.reason,
         adjustedBy: user?.email || 'admin',
       });
@@ -1471,7 +1507,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                                 <td className="py-3 px-4 whitespace-nowrap text-sm text-center">
                                     {req.compensation === Compensation.EXTRA_TIME ? (
                                         <span className="font-mono font-semibold text-amber-800 bg-amber-100/60 px-2 py-1 rounded">
-                                            {formatMinutes(calculateMinutesToCompensate(req))}
+                                            {formatMinutes(calculateMinutesToCompensate(req, findDetailedEmployee(`${req.lastName} ${req.motherLastName} ${req.firstName}`.toUpperCase().replace(/\s+/g, ' ').trim(), detailedEmployees)))}
                                         </span>
                                     ) : (
                                         <span className="text-slate-400">-</span>
@@ -1893,35 +1929,47 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                   const isEditing = editingTardiness?.key === editKey;
                   const effectiveMinutes = adj ? adj.adjustedMinutesLate : td.minutesLate;
                   const hasSanction = adj ? adj.hasSanction : true;
+                  const isAuthorized = adj?.isAuthorized === true;
 
                   return (
-                    <tr key={editKey} className="hover:bg-slate-100/50">
-                      <td className="py-2 px-3 text-sm text-slate-800 whitespace-nowrap">{td.employeeName}</td>
+                    <tr key={editKey} className={`hover:bg-slate-100/50 ${isAuthorized ? 'bg-blue-50/40' : ''}`}>
+                      <td className="py-2 px-3 text-sm text-slate-800 whitespace-nowrap">
+                        {td.employeeName}
+                        {isAuthorized && (
+                          <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-blue-100 text-blue-700">Autorizado</span>
+                        )}
+                      </td>
                       <td className="py-2 px-3 text-sm text-slate-700 font-mono whitespace-nowrap">
                         {new Date(td.date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
                       </td>
                       <td className="py-2 px-3 text-sm text-center font-mono text-red-700 font-semibold">{td.checkInTime}</td>
                       <td className="py-2 px-3 text-sm text-center font-mono text-slate-600">{td.scheduleTime}</td>
                       <td className="py-2 px-3 text-sm text-center">
-                        <span className="font-mono font-bold text-amber-800 bg-amber-100/60 px-2 py-0.5 rounded">
+                        <span className={`font-mono font-bold px-2 py-0.5 rounded ${isAuthorized ? 'text-blue-600 bg-blue-100/60 line-through' : 'text-amber-800 bg-amber-100/60'}`}>
                           {td.minutesLate} min
                         </span>
                       </td>
                       <td className="py-2 px-3 text-sm text-center">
                         {isEditing ? (
-                          <input
-                            type="number"
-                            min="0"
-                            value={editingTardiness.minutes}
-                            onChange={(e) => setEditingTardiness(prev => prev ? {...prev, minutes: parseInt(e.target.value) || 0} : null)}
-                            className="w-20 text-center px-2 py-1 border border-amber-300 rounded text-sm font-mono"
-                          />
+                          editingTardiness.isAuthorized ? (
+                            <span className="text-xs font-semibold text-blue-700">0 min (autorizado)</span>
+                          ) : (
+                            <input
+                              type="number"
+                              min="0"
+                              value={editingTardiness.minutes}
+                              onChange={(e) => setEditingTardiness(prev => prev ? {...prev, minutes: parseInt(e.target.value) || 0} : null)}
+                              className="w-20 text-center px-2 py-1 border border-amber-300 rounded text-sm font-mono"
+                            />
+                          )
                         ) : (
                           <span className={`font-mono font-bold px-2 py-0.5 rounded ${
+                            isAuthorized ? 'text-blue-800 bg-blue-100/60' :
                             effectiveMinutes !== td.minutesLate ? 'text-blue-800 bg-blue-100/60' : 'text-slate-600'
                           }`}>
                             {effectiveMinutes} min
-                            {effectiveMinutes !== td.minutesLate && (
+                            {isAuthorized && <span className="text-[10px] ml-1 text-blue-500">autorizado</span>}
+                            {!isAuthorized && effectiveMinutes !== td.minutesLate && (
                               <span className="text-[10px] ml-1 text-blue-500">ajustado</span>
                             )}
                           </span>
@@ -1929,14 +1977,20 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                       </td>
                       <td className="py-2 px-3 text-sm text-center">
                         {isEditing ? (
-                          <select
-                            value={editingTardiness.sanction ? 'si' : 'no'}
-                            onChange={(e) => setEditingTardiness(prev => prev ? {...prev, sanction: e.target.value === 'si'} : null)}
-                            className="text-xs px-2 py-1 border border-slate-300 rounded"
-                          >
-                            <option value="si">Si aplica</option>
-                            <option value="no">No aplica</option>
-                          </select>
+                          editingTardiness.isAuthorized ? (
+                            <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">Autorizado</span>
+                          ) : (
+                            <select
+                              value={editingTardiness.sanction ? 'si' : 'no'}
+                              onChange={(e) => setEditingTardiness(prev => prev ? {...prev, sanction: e.target.value === 'si'} : null)}
+                              className="text-xs px-2 py-1 border border-slate-300 rounded"
+                            >
+                              <option value="si">Si aplica</option>
+                              <option value="no">No aplica</option>
+                            </select>
+                          )
+                        ) : isAuthorized ? (
+                          <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">Autorizado</span>
                         ) : (
                           <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
                             hasSanction ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
@@ -1949,13 +2003,24 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                         <td className="py-2 px-3 text-sm text-center">
                           {isEditing ? (
                             <div className="space-y-1">
-                              <input
-                                type="text"
-                                placeholder="Motivo del ajuste..."
-                                value={editingTardiness.reason}
-                                onChange={(e) => setEditingTardiness(prev => prev ? {...prev, reason: e.target.value} : null)}
-                                className="w-full text-xs px-2 py-1 border border-slate-300 rounded"
-                              />
+                              {!editingTardiness.isAuthorized && (
+                                <input
+                                  type="text"
+                                  placeholder="Motivo del ajuste..."
+                                  value={editingTardiness.reason}
+                                  onChange={(e) => setEditingTardiness(prev => prev ? {...prev, reason: e.target.value} : null)}
+                                  className="w-full text-xs px-2 py-1 border border-slate-300 rounded"
+                                />
+                              )}
+                              {editingTardiness.isAuthorized && (
+                                <input
+                                  type="text"
+                                  placeholder="Motivo de autorizacion..."
+                                  value={editingTardiness.reason}
+                                  onChange={(e) => setEditingTardiness(prev => prev ? {...prev, reason: e.target.value} : null)}
+                                  className="w-full text-xs px-2 py-1 border border-blue-300 rounded"
+                                />
+                              )}
                               <div className="flex gap-1 justify-center">
                                 <button
                                   onClick={() => handleSaveTardinessAdjustment(td.employeeName, td.date, td.minutesLate)}
@@ -1972,18 +2037,50 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                               </div>
                             </div>
                           ) : (
-                            <button
-                              onClick={() => setEditingTardiness({
-                                key: editKey,
-                                minutes: effectiveMinutes,
-                                sanction: hasSanction,
-                                reason: adj?.reason || '',
-                              })}
-                              className="px-2 py-1 text-xs font-medium rounded bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
-                              title="Ajustar retardo"
-                            >
-                              Ajustar
-                            </button>
+                            <div className="flex gap-1 justify-center flex-wrap">
+                              <button
+                                onClick={() => setEditingTardiness({
+                                  key: editKey,
+                                  minutes: effectiveMinutes,
+                                  sanction: hasSanction,
+                                  reason: adj?.reason || '',
+                                  isAuthorized: false,
+                                })}
+                                className="px-2 py-1 text-xs font-medium rounded bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
+                                title="Ajustar retardo"
+                              >
+                                Ajustar
+                              </button>
+                              {!isAuthorized ? (
+                                <button
+                                  onClick={() => setEditingTardiness({
+                                    key: editKey,
+                                    minutes: 0,
+                                    sanction: false,
+                                    reason: adj?.reason || 'Entrada autorizada',
+                                    isAuthorized: true,
+                                  })}
+                                  className="px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+                                  title="Marcar como entrada autorizada (no cuenta como retardo)"
+                                >
+                                  Autorizar
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => setEditingTardiness({
+                                    key: editKey,
+                                    minutes: td.minutesLate,
+                                    sanction: true,
+                                    reason: '',
+                                    isAuthorized: false,
+                                  })}
+                                  className="px-2 py-1 text-xs font-medium rounded bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                                  title="Quitar autorizacion"
+                                >
+                                  Revocar
+                                </button>
+                              )}
+                            </div>
                           )}
                           {adj?.reason && !isEditing && (
                             <p className="text-[10px] text-slate-500 mt-1 max-w-[150px] truncate" title={adj.reason}>

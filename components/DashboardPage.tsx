@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { DetailedEmployee, PermissionRequest, LogEntry } from '@/types';
 import { LogType } from '@/types';
-import { employeesService, permissionsService, logsService, motivationalService, toleranceService, announcementsService, importantDatesService, vacationRequestsService, dashboardLayoutService, policiesService, policyAcksService, type Announcement, type ImportantDate, type VacationRequestRecord, type InternalPolicy, type PolicyAcknowledgment } from '../src/services/firestoreService';
+import { employeesService, permissionsService, logsService, motivationalService, toleranceService, announcementsService, importantDatesService, vacationRequestsService, dashboardLayoutService, policiesService, policyAcksService, tardinessService, type Announcement, type ImportantDate, type VacationRequestRecord, type InternalPolicy, type PolicyAcknowledgment, type TardinessAdjustment } from '../src/services/firestoreService';
 import { getOfficialHolidays } from '../utils/mexicanHolidays';
 import { useAuth } from '../src/contexts/AuthContext';
 import { calculateVacation } from './nominasUtils';
@@ -75,6 +75,7 @@ export const DashboardPage: React.FC = () => {
     const [allLogs, setAllLogs] = useState<LogEntry[]>([]);
     const [motivationalEnabled, setMotivationalEnabled] = useState(true);
     const [toleranceMinutes, setToleranceMinutes] = useState(10);
+    const [tardinessAdjustments, setTardinessAdjustments] = useState<TardinessAdjustment[]>([]);
 
     // Anuncios
     const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -104,6 +105,11 @@ export const DashboardPage: React.FC = () => {
 
     useEffect(() => {
         const unsubscribe = toleranceService.subscribe((settings) => setToleranceMinutes(settings.minutes));
+        return () => unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        const unsubscribe = tardinessService.subscribe((adjs) => setTardinessAdjustments(adjs));
         return () => unsubscribe();
     }, []);
 
@@ -239,7 +245,10 @@ export const DashboardPage: React.FC = () => {
             if (checkInDate > tolerance) {
                 const minutesLate = Math.round((checkInDate.getTime() - schedDate.getTime()) / 60000);
                 const dateStr = checkInDate.toISOString().slice(0, 10);
-                // Evitar duplicados por dia
+                // Verificar si esta entrada fue autorizada por admin
+                const adjKey = `${log.employeeName}__${dateStr}`.replace(/\s+/g, '_');
+                const adj = tardinessAdjustments.find(a => a.id === adjKey);
+                if (adj?.isAuthorized) continue;
                 if (!lateDates.find(d => d.date === dateStr)) {
                     lateDates.push({ date: dateStr, minutesLate });
                 }
@@ -248,7 +257,7 @@ export const DashboardPage: React.FC = () => {
 
         lateDates.sort((a, b) => b.date.localeCompare(a.date));
         return { count: lateDates.length, dates: lateDates };
-    }, [allLogs, currentEmployee, toleranceMinutes]);
+    }, [allLogs, currentEmployee, toleranceMinutes, tardinessAdjustments]);
 
     // Días con registro incompleto en la semana actual
     const incompleteDays = useMemo(() => {

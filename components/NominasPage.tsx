@@ -281,39 +281,40 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             logsByDay[dayKey].push(log);
           });
 
-          // Recorrer cada día del periodo
+          // Recorrer cada día del periodo (solo hasta hoy, no fechas futuras)
           const workedDays = new Set<string>();
           const dayCursor = new Date(selectedPeriod.startDate + 'T12:00:00');
           const dayEnd = new Date(selectedPeriod.endDate + 'T12:00:00');
+          const today = new Date();
+          today.setHours(23, 59, 59, 999);
           while (dayCursor <= dayEnd) {
             const dateStr = `${dayCursor.getFullYear()}-${String(dayCursor.getMonth() + 1).padStart(2, '0')}-${String(dayCursor.getDate()).padStart(2, '0')}`;
             const dayOfWeek = dayCursor.getDay();
             const dayKeyUnpadded = `${dayCursor.getFullYear()}-${dayCursor.getMonth()}-${dayCursor.getDate()}`;
 
+            // No contar días futuros
+            if (dayCursor > today) {
+              dayCursor.setDate(dayCursor.getDate() + 1);
+              continue;
+            }
+
             if (dayOfWeek === 0) {
-              // Domingo: siempre pagado como descanso
               workedDays.add(dayKeyUnpadded);
             } else if (dayOfWeek === 6 && emp.horarioSabado?.toLowerCase().includes('no labora')) {
-              // Sábado no laborable: pagado como descanso
               workedDays.add(dayKeyUnpadded);
             } else {
-              // Día laborable: contar como trabajado si tiene al menos ENTRADA
-              // (registros incompletos se alertan al empleado, pero no descuentan día)
               const attendanceDay = daysByDate.get(dateStr);
               if (attendanceDay) {
-                // Tiene AttendanceDay → pagar si tiene al menos entrada
                 if (attendanceDay.checkInTimestamp) {
                   workedDays.add(dayKeyUnpadded);
                 }
               } else if (logsByDay[dateStr]) {
-                // Sin AttendanceDay → verificar si tiene al menos ENTRADA
                 const dayLogs = logsByDay[dateStr];
                 const hasEntrada = dayLogs.some(l => l.type === LogType.ENTRADA);
                 if (hasEntrada) {
                   workedDays.add(dayKeyUnpadded);
                 }
               }
-              // Vacaciones o permisos aprobados con goce → contar como trabajado
               if (!workedDays.has(dayKeyUnpadded) && paidLeaveDays[emp.id]?.has(dayKeyUnpadded)) {
                 workedDays.add(dayKeyUnpadded);
               }
@@ -551,7 +552,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         bonoObjetivos: salary.bonoObjetivos,
         apoyoGasolina: salary.apoyoGasolina,
         comision: employeeCommissions[emp.codigo] || 0,
-        total: salary.netoAPagar + (employeeCommissions[emp.codigo] || 0),
+        prestamo: loanDeductions[emp.codigo] || 0,
+        total: salary.netoAPagar + (employeeCommissions[emp.codigo] || 0) - (loanDeductions[emp.codigo] || 0),
         corregido: days !== (originalDays[emp.id] ?? diasEnPeriodo),
         nota: employeeNotes[emp.id] || '',
       };
@@ -645,11 +647,13 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         }
       }
 
-      // Aplicar pagos de préstamos activos
+      // Aplicar pagos de préstamos activos (solo si no se aplicó ya para este periodo)
       for (const emp of employees) {
         const activeLoans = loansService.getActiveByEmployee(allLoans, emp.codigo);
         for (const loan of activeLoans) {
           if (!loan.id) continue;
+          const alreadyApplied = loan.payments.some(p => p.applied && p.periodLabel === periodLabel);
+          if (alreadyApplied) continue;
           const nextPaymentIdx = loan.payments.findIndex(p => !p.applied);
           if (nextPaymentIdx >= 0) {
             try {
@@ -685,7 +689,15 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
 
   // Descargar corte como Excel CSV
   const handleDownloadExcel = (cut: PayrollCut) => {
-    const headers = ['Codigo', 'Nombre Completo', 'Fecha Ingreso', 'Dias Vacaciones', 'Aplica Vacaciones', 'Dias Trabajados', 'Dias Periodo', 'Bono Puntualidad', 'Bono Objetivos', 'Apoyo Gasolina', 'Total'];
+    const hasComm = cut.employees.some(e => (e.comision || 0) > 0);
+    const hasLoans = cut.employees.some(e => (e.prestamo || 0) > 0);
+    const headers = [
+      'Codigo', 'Nombre Completo', 'Fecha Ingreso', 'Dias Vacaciones', 'Aplica Vacaciones',
+      'Dias Trabajados', 'Dias Periodo', 'Bono Puntualidad', 'Bono Objetivos', 'Apoyo Gasolina',
+      ...(hasComm ? ['Comisiones'] : []),
+      ...(hasLoans ? ['Prestamo'] : []),
+      'Neto a Pagar',
+    ];
     const rows = cut.employees.map(e => [
       e.codigo,
       `"${e.nombre}"`,
@@ -697,14 +709,19 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       e.bonoPuntualidad.toFixed(2),
       e.bonoObjetivos.toFixed(2),
       e.apoyoGasolina.toFixed(2),
+      ...(hasComm ? [(e.comision || 0).toFixed(2)] : []),
+      ...(hasLoans ? [(e.prestamo || 0) > 0 ? `-${(e.prestamo || 0).toFixed(2)}` : '0.00'] : []),
       e.total.toFixed(2),
     ]);
-    // Totales
+    const totalComm = cut.employees.reduce((a, e) => a + (e.comision || 0), 0);
+    const totalLoans = cut.employees.reduce((a, e) => a + (e.prestamo || 0), 0);
     rows.push([
       '', 'TOTALES', '', '', '', '', '',
       cut.totals.bonoPuntualidad.toFixed(2),
       cut.totals.bonoObjetivos.toFixed(2),
       cut.totals.apoyoGasolina.toFixed(2),
+      ...(hasComm ? [totalComm.toFixed(2)] : []),
+      ...(hasLoans ? [`-${totalLoans.toFixed(2)}`] : []),
       cut.totals.total.toFixed(2),
     ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -1145,7 +1162,9 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                                           try { await commissionsService.update(reportId, { lockedByPayroll: '' }); } catch {}
                                         }
                                       }
-                                      toast.success('Periodo reabierto. Puedes editarlo y volver a cerrarlo.');
+                                      // Revertir pagos de préstamos de este periodo
+                                      const reverted = await loansService.revertPaymentsForPeriod(allLoans, cut.periodLabel);
+                                      toast.success(`Periodo reabierto.${reverted > 0 ? ` ${reverted} pago(s) de préstamo revertido(s).` : ''}`);
                                     } catch (err: any) {
                                       toast.error(`Error: ${err.message}`);
                                     }

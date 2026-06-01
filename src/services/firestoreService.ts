@@ -901,6 +901,7 @@ export interface TardinessAdjustment {
   originalMinutesLate: number;
   adjustedMinutesLate: number;
   hasSanction: boolean;
+  isAuthorized?: boolean;
   reason: string;
   adjustedBy: string;
   adjustedAt?: Date;
@@ -1048,6 +1049,8 @@ export interface PayrollCutEmployee {
   bonoPuntualidad: number;
   bonoObjetivos: number;
   apoyoGasolina: number;
+  comision?: number;
+  prestamo?: number;
   total: number;
 }
 
@@ -1613,6 +1616,35 @@ export const loansService = {
       remainingBalance: loan.loanAmount - paidAmount,
       status: paidAmount >= loan.loanAmount ? 'liquidado' : 'aprobado',
     });
+  },
+
+  // Revertir pagos aplicados para un periodo específico
+  async revertPaymentsForPeriod(allLoans: EmployeeLoan[], periodLabel: string): Promise<number> {
+    let reverted = 0;
+    for (const loan of allLoans) {
+      if (!loan.id) continue;
+      const payments = [...loan.payments];
+      let changed = false;
+      for (let i = 0; i < payments.length; i++) {
+        if (payments[i].applied && payments[i].periodLabel === periodLabel) {
+          payments[i].applied = false;
+          payments[i].date = '';
+          payments[i].periodLabel = '';
+          changed = true;
+          reverted++;
+        }
+      }
+      if (changed) {
+        const paidAmount = payments.filter(p => p.applied).reduce((s, p) => s + p.amount, 0);
+        await this.update(loan.id, {
+          payments,
+          paidAmount,
+          remainingBalance: loan.loanAmount - paidAmount,
+          status: paidAmount >= loan.loanAmount ? 'liquidado' : 'aprobado',
+        });
+      }
+    }
+    return reverted;
   },
 };
 
