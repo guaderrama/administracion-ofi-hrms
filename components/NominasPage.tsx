@@ -52,7 +52,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const draftDaysRef = useRef<Record<string, number> | null>(null); // Saved daysWorked from loaded draft
 
   useEffect(() => {
-    const unsubscribe = employeesService.subscribe((emps) => setEmployees(emps));
+    const unsubscribe = employeesService.subscribe((emps) => setEmployees(emps.filter(e => e.activo !== false)));
     return () => unsubscribe();
   }, []);
 

@@ -13,7 +13,7 @@ import type {
 // PARSEO DE CSV
 // ============================================
 
-const RETAIL_KEYWORDS = ['JEWELRY', 'MIA', 'BOLSA', 'PERFUME'];
+const RETAIL_KEYWORDS = ['JEWELRY', 'JEWELLERY', 'MIA', 'BOLSA', 'PERFUME', 'PULSERA', 'COLLAR', 'ANILLO', 'ARETE', 'BRACELET', 'NECKLACE', 'RING', 'EARRING', 'PENDANT', 'COLGANTE', 'JOYERIA', 'JOYERÍA'];
 const ORIGINAL_KEYWORDS = ['ORIGINAL', 'LIMITED EDITION'];
 
 function classifyProduct(details: string): ProductCategory {
@@ -95,6 +95,12 @@ function isEmployeeSale(customerCode: string, customerName: string, employees: D
 }
 
 export function parseCSV(csvText: string): string[][] {
+  // Detectar separador: si hay más tabs que comas en la primera línea, usar tab
+  const firstLine = csvText.split(/\r?\n/)[0] || '';
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const separator = tabCount > commaCount ? '\t' : ',';
+
   const rows: string[][] = [];
   let current = '';
   let inQuotes = false;
@@ -109,7 +115,7 @@ export function parseCSV(csvText: string): string[][] {
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (ch === ',' && !inQuotes) {
+    } else if (ch === separator && !inQuotes) {
       row.push(current.trim());
       current = '';
     } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
@@ -426,6 +432,56 @@ export function distributeSemanaCommission(
       commission: Math.round(commission * 100) / 100,
     };
   });
+}
+
+export interface ArtistCommissionResult {
+  souvenirsBaseJueves: number;
+  souvenirsBaseSemana: number;
+  commissionJueves: number;
+  commissionSemana: number;
+  totalCommission: number;
+  percent: number;
+}
+
+/** Calcula comisión del artista (solo souvenirs, ambos periodos) */
+export function calculateArtistCommission(
+  sales: SaleGroup[],
+  settings: CommissionSettings,
+  percent: number = 12,
+): ArtistCommissionResult {
+  let souvenirsBaseJueves = 0;
+  let souvenirsBaseSemana = 0;
+
+  sales.forEach(sale => {
+    if (sale.isExcluded) return;
+    const isJueves = sale.dayOfWeek === 4;
+
+    if (sale.lines.length > 0) {
+      sale.lines.forEach(line => {
+        if (line.category === 'souvenirs') {
+          const base = getCommissionableBase(line.total, sale.paymentMethod, settings);
+          if (isJueves) souvenirsBaseJueves += base;
+          else souvenirsBaseSemana += base;
+        }
+      });
+    } else {
+      const base = getCommissionableBase(sale.totalAmount, sale.paymentMethod, settings);
+      if (isJueves) souvenirsBaseJueves += base;
+      else souvenirsBaseSemana += base;
+    }
+  });
+
+  const commissionJueves = Math.round(souvenirsBaseJueves * percent / 100 * 100) / 100;
+  const commissionSemana = Math.round(souvenirsBaseSemana * percent / 100 * 100) / 100;
+
+  return {
+    souvenirsBaseJueves: Math.round(souvenirsBaseJueves * 100) / 100,
+    souvenirsBaseSemana: Math.round(souvenirsBaseSemana * 100) / 100,
+    commissionJueves,
+    commissionSemana,
+    totalCommission: Math.round((commissionJueves + commissionSemana) * 100) / 100,
+    percent,
+  };
 }
 
 export function formatMXN(amount: number): string {

@@ -31,11 +31,21 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
   // Edición de pago individual
   const [editingLoan, setEditingLoan] = useState<EmployeeLoan | null>(null);
 
+  const [dedupDone, setDedupDone] = useState(false);
   useEffect(() => {
     const u1 = employeesService.subscribe(setEmployees);
     const u2 = loansService.subscribe(setLoans);
     return () => { u1(); u2(); };
   }, []);
+
+  useEffect(() => {
+    if (loans.length > 0 && !dedupDone) {
+      setDedupDone(true);
+      loansService.deduplicatePayments(loans).then(fixed => {
+        if (fixed > 0) console.log(`Limpiados ${fixed} pagos duplicados`);
+      }).catch(() => {});
+    }
+  }, [loans, dedupDone]);
 
   const activoLoans = useMemo(() => loans.filter(l => l.status === 'aprobado' && l.remainingBalance > 0), [loans]);
   const pendienteLoans = useMemo(() => loans.filter(l => l.status === 'pendiente'), [loans]);

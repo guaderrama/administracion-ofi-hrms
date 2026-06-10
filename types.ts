@@ -201,6 +201,9 @@ export interface DetailedEmployee {
   bonoObjetivos: number;
   apoyoGasolina: number;
   lastPasswordReset?: string; // ISO date string of last password reset
+  activo?: boolean;
+  fechaBaja?: string;
+  motivoBaja?: string;
 }
 
 // --- Income Types ---

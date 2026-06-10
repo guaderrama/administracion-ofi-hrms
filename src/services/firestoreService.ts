@@ -19,6 +19,7 @@ import {
   writeBatch,
   serverTimestamp,
   runTransaction,
+  deleteField,
 } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
 import type { DetailedEmployee, LogEntry, PermissionRequest, IncomeEntry, AttendanceDay, AttendanceDayStatus, EmployeeLoan } from '../../types';
@@ -1459,8 +1460,8 @@ function computeAttendanceDayFromLogs(
     employeeName,
     date,
     status,
-    checkInTimestamp: checkIn?.timestamp,
-    checkOutTimestamp: checkOut?.timestamp,
+    checkInTimestamp: checkIn?.timestamp ?? null,
+    checkOutTimestamp: checkOut?.timestamp ?? null,
     lunchBreaks,
     workedMinutes,
     isLate,
@@ -1616,6 +1617,40 @@ export const loansService = {
       remainingBalance: loan.loanAmount - paidAmount,
       status: paidAmount >= loan.loanAmount ? 'liquidado' : 'aprobado',
     });
+  },
+
+  // Limpiar pagos duplicados (mismo periodLabel aplicado más de una vez)
+  async deduplicatePayments(allLoans: EmployeeLoan[]): Promise<number> {
+    let fixed = 0;
+    for (const loan of allLoans) {
+      if (!loan.id) continue;
+      const payments = [...loan.payments];
+      const seenPeriods = new Set<string>();
+      let changed = false;
+      for (let i = 0; i < payments.length; i++) {
+        if (payments[i].applied && payments[i].periodLabel) {
+          if (seenPeriods.has(payments[i].periodLabel!)) {
+            payments[i].applied = false;
+            payments[i].date = '';
+            payments[i].periodLabel = '';
+            changed = true;
+            fixed++;
+          } else {
+            seenPeriods.add(payments[i].periodLabel!);
+          }
+        }
+      }
+      if (changed) {
+        const paidAmount = payments.filter(p => p.applied).reduce((s, p) => s + p.amount, 0);
+        await this.update(loan.id, {
+          payments,
+          paidAmount,
+          remainingBalance: loan.loanAmount - paidAmount,
+          status: paidAmount >= loan.loanAmount ? 'liquidado' : 'aprobado',
+        });
+      }
+    }
+    return fixed;
   },
 
   // Revertir pagos aplicados para un periodo específico

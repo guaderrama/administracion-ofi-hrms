@@ -12,9 +12,11 @@ import {
   distributeJuevesCommission,
   distributeSemanaCommission,
   getCommissionableBase,
+  calculateArtistCommission,
   DEFAULT_SETTINGS,
   formatMXN,
 } from '../utils/commissionUtils';
+import type { ArtistCommissionResult } from '../utils/commissionUtils';
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
@@ -59,8 +61,10 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
   const [employees, setEmployees] = useState<DetailedEmployee[]>([]);
   const [sales, setSales] = useState<SaleGroup[]>([]);
   const [settings, setSettings] = useState<CommissionSettings>(DEFAULT_SETTINGS);
+  const [artistPercent, setArtistPercent] = useState(10);
+  const [showSettings, setShowSettings] = useState(false);
   const [presentMap, setPresentMap] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab] = useState<'upload' | 'jueves' | 'semana'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'jueves' | 'semana' | 'artista'>('upload');
   const [fileName, setFileName] = useState('');
   // Empleados que comisionan en semana (por defecto: solo asesores de venta + manuales)
   const [semanaComisionMap, setSemanaComisionMap] = useState<Record<string, boolean>>({});
@@ -259,6 +263,11 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
     [sales, settings]
   );
 
+  const artistCommission = useMemo(
+    () => sales.length > 0 ? calculateArtistCommission(sales, settings, artistPercent) : null,
+    [sales, settings, artistPercent]
+  );
+
   // Distribuir comisiones
   const juevesDistribution = useMemo(
     () => juevesSummary ? distributeJuevesCommission(juevesSummary, employees, presentMap) : [],
@@ -397,6 +406,7 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
           { key: 'upload', label: 'Importar CSV' },
           { key: 'jueves', label: `Jueves (Caminata)${juevesSummary ? ` — ${formatMXN(juevesSummary.totalCommission)}` : ''}` },
           { key: 'semana', label: `Semana (Galería)${semanaSummary ? ` — ${formatMXN(semanaSummary.totalCommission)}` : ''}` },
+          { key: 'artista', label: `Artista (${artistPercent}%)${artistCommission ? ` — ${formatMXN(artistCommission.totalCommission)}` : ''}` },
         ].map(tab => (
           <button
             key={tab.key}
@@ -410,23 +420,36 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
         ))}
       </div>
 
-      {/* Parámetros editables — siempre visible */}
+      {/* Parámetros editables — desplegable */}
       {sales.length > 0 && (
         <Card className="mb-6">
-          <h3 className="text-sm font-bold text-slate-700 mb-3">Parámetros de Cálculo</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-            <SettingInput label="IVA %" value={settings.ivaPercent} onChange={v => handleSettingChange('ivaPercent', v)} />
-            <SettingInput label="Com. Bancaria %" value={settings.bankFeePercent} onChange={v => handleSettingChange('bankFeePercent', v)} />
-            <SettingInput label="Tipo Cambio USD" value={settings.exchangeRate} onChange={v => handleSettingChange('exchangeRate', v)} />
-            <SettingInput label="Joyería % Jue" value={settings.joyeriaPercentJueves} onChange={v => handleSettingChange('joyeriaPercentJueves', v)} />
-            <SettingInput label="Souvenirs % Jue" value={settings.souvenirsPercentJueves} onChange={v => handleSettingChange('souvenirsPercentJueves', v)} />
-            <SettingInput label="Originales % Jue" value={settings.originalesPercentJueves} onChange={v => handleSettingChange('originalesPercentJueves', v)} />
-            <SettingInput label="Joyería % Sem" value={settings.joyeriaPercentSemana} onChange={v => handleSettingChange('joyeriaPercentSemana', v)} />
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mt-2">
-            <SettingInput label="Souvenirs % Sem" value={settings.souvenirsPercentSemana} onChange={v => handleSettingChange('souvenirsPercentSemana', v)} />
-            <SettingInput label="Originales % Sem" value={settings.originalesPercentSemana} onChange={v => handleSettingChange('originalesPercentSemana', v)} />
-          </div>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="w-full flex items-center justify-between text-left"
+          >
+            <h3 className="text-sm font-bold text-slate-700">Parámetros de Cálculo</h3>
+            <svg className={`w-5 h-5 text-slate-400 transition-transform ${showSettings ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+          {showSettings && (
+            <div className="mt-3 pt-3 border-t border-slate-200">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                <SettingInput label="IVA %" value={settings.ivaPercent} onChange={v => handleSettingChange('ivaPercent', v)} />
+                <SettingInput label="Com. Bancaria %" value={settings.bankFeePercent} onChange={v => handleSettingChange('bankFeePercent', v)} />
+                <SettingInput label="Tipo Cambio USD" value={settings.exchangeRate} onChange={v => handleSettingChange('exchangeRate', v)} />
+                <SettingInput label="Joyería % Jue" value={settings.joyeriaPercentJueves} onChange={v => handleSettingChange('joyeriaPercentJueves', v)} />
+                <SettingInput label="Souvenirs % Jue" value={settings.souvenirsPercentJueves} onChange={v => handleSettingChange('souvenirsPercentJueves', v)} />
+                <SettingInput label="Originales % Jue" value={settings.originalesPercentJueves} onChange={v => handleSettingChange('originalesPercentJueves', v)} />
+                <SettingInput label="Joyería % Sem" value={settings.joyeriaPercentSemana} onChange={v => handleSettingChange('joyeriaPercentSemana', v)} />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mt-2">
+                <SettingInput label="Souvenirs % Sem" value={settings.souvenirsPercentSemana} onChange={v => handleSettingChange('souvenirsPercentSemana', v)} />
+                <SettingInput label="Originales % Sem" value={settings.originalesPercentSemana} onChange={v => handleSettingChange('originalesPercentSemana', v)} />
+                <SettingInput label="Artista %" value={artistPercent} onChange={v => setArtistPercent(parseFloat(v) || 0)} />
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
@@ -471,6 +494,7 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
                       <thead className="bg-red-50 sticky top-0">
                         <tr>
                           <th className="py-2 px-3 text-left">Folio</th>
+                          <th className="py-2 px-3 text-left">Fecha</th>
                           <th className="py-2 px-3 text-left">Cliente</th>
                           <th className="py-2 px-3 text-right">Total</th>
                           <th className="py-2 px-3 text-left">Razón</th>
@@ -480,6 +504,7 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
                         {excludedSales.map(s => (
                           <tr key={s.receiptNum} className="text-red-800">
                             <td className="py-1.5 px-3 font-mono">{s.receiptNum}</td>
+                            <td className="py-1.5 px-3 font-mono">{s.date}</td>
                             <td className="py-1.5 px-3">{s.customerName || 'N/A'}</td>
                             <td className="py-1.5 px-3 text-right">{formatMXN(s.totalAmount)}</td>
                             <td className="py-1.5 px-3">{s.excludeReason}</td>
@@ -837,6 +862,43 @@ export const ComisionesPage: React.FC<ComisionesPageProps> = ({ setView }) => {
 
       {activeTab === 'semana' && !semanaSummary && (
         <Card><p className="text-center text-slate-500 py-8">Importa un CSV primero para ver las comisiones semanales.</p></Card>
+      )}
+
+      {/* TAB: Artista */}
+      {activeTab === 'artista' && artistCommission && (
+        <div className="space-y-6">
+          <Card>
+            <h3 className="text-lg font-bold text-purple-800 mb-2">
+              Comisión Artista — Ivan Guaderrama Torres
+              <span className="text-sm font-normal text-slate-500 ml-2">({artistPercent}% solo Souvenirs)</span>
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">No aplica joyería, perfumes ni bolsas. Solo souvenirs de jueves y entre semana.</p>
+
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="border border-purple-200 rounded-lg p-4 bg-purple-50/30">
+                <p className="text-xs text-slate-500">Jueves (Caminata)</p>
+                <p className="text-xs text-slate-400">Base: {formatMXN(artistCommission.souvenirsBaseJueves)}</p>
+                <p className="text-xl font-bold text-purple-800">{formatMXN(artistCommission.commissionJueves)}</p>
+              </div>
+              <div className="border border-purple-200 rounded-lg p-4 bg-purple-50/30">
+                <p className="text-xs text-slate-500">Semana (Galería)</p>
+                <p className="text-xs text-slate-400">Base: {formatMXN(artistCommission.souvenirsBaseSemana)}</p>
+                <p className="text-xl font-bold text-purple-800">{formatMXN(artistCommission.commissionSemana)}</p>
+              </div>
+            </div>
+
+            <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-4 flex justify-between items-center">
+              <div>
+                <span className="text-lg font-bold text-purple-900">Total Comisión Artista</span>
+                <p className="text-xs text-purple-600">Base total souvenirs: {formatMXN(artistCommission.souvenirsBaseJueves + artistCommission.souvenirsBaseSemana)} × {artistPercent}%</p>
+              </div>
+              <span className="text-2xl font-bold text-purple-900">{formatMXN(artistCommission.totalCommission)}</span>
+            </div>
+          </Card>
+        </div>
+      )}
+      {activeTab === 'artista' && !artistCommission && (
+        <Card><p className="text-center text-slate-500 py-8">Importa un CSV primero para ver la comisión del artista.</p></Card>
       )}
     </div>
   );

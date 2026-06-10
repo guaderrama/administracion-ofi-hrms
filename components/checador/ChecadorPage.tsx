@@ -43,7 +43,7 @@ export const ChecadorPage: React.FC = () => {
     // Cargar empleados desde Firestore
     useEffect(() => {
         const unsubscribe = employeesService.subscribe((employees) => {
-            setDetailedEmployees(employees);
+            setDetailedEmployees(employees.filter(e => e.activo !== false));
         });
         return () => unsubscribe();
     }, []);

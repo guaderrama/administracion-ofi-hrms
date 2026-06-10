@@ -12,6 +12,7 @@ interface DailySummary {
     employeeName: string;
     date: string;
     workedTime: number | null; // in minutes
+    lunchDeducted: boolean; // false = horas infladas (no se descontó comida)
 }
 
 export const WorkedHoursSummary: React.FC<WorkedHoursSummaryProps> = ({ logs }) => {
@@ -41,15 +42,17 @@ export const WorkedHoursSummary: React.FC<WorkedHoursSummaryProps> = ({ logs }) 
                 const lunchStarts = sortedLogs.filter(l => l.type === LogType.INICIO_COMIDA);
                 const lunchEnds = sortedLogs.filter(l => l.type === LogType.FIN_COMIDA);
                 const pairs = Math.min(lunchStarts.length, lunchEnds.length);
+                let deductedPairs = 0;
                 for (let i = 0; i < pairs; i++) {
                     if (lunchEnds[i].timestamp > lunchStarts[i].timestamp) {
                         totalMillis -= (lunchEnds[i].timestamp - lunchStarts[i].timestamp);
+                        deductedPairs++;
                     }
                 }
 
-                dailySummaries.push({ employeeName, date, workedTime: totalMillis / (1000 * 60) });
+                dailySummaries.push({ employeeName, date, workedTime: totalMillis / (1000 * 60), lunchDeducted: deductedPairs > 0 });
             } else {
-                dailySummaries.push({ employeeName, date, workedTime: null });
+                dailySummaries.push({ employeeName, date, workedTime: null, lunchDeducted: false });
             }
         }
         return dailySummaries.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime() || a.employeeName.localeCompare(b.employeeName));
@@ -63,15 +66,17 @@ export const WorkedHoursSummary: React.FC<WorkedHoursSummaryProps> = ({ logs }) 
     };
 
     const downloadCSV = () => {
-        const csvRows = ["Colaborador,Fecha,Horas Trabajadas (minutos),Formato"];
+        const csvRows = ["Colaborador,Fecha,Horas Trabajadas (minutos),Formato,Observacion"];
 
         summary.forEach(item => {
             const formattedTime = item.workedTime !== null ? `${Math.floor(item.workedTime / 60)}h ${Math.round(item.workedTime % 60)}m` : "Incompleto";
+            const observacion = item.workedTime !== null && !item.lunchDeducted ? "Sin descuento de comida (horas posiblemente infladas)" : "";
             const row = [
                 `"${item.employeeName.replace(/"/g, '""')}"`,
                 `"${item.date}"`,
                 item.workedTime ?? 'N/A',
-                `"${formattedTime}"`
+                `"${formattedTime}"`,
+                `"${observacion}"`
             ].join(",");
             csvRows.push(row);
         });
@@ -101,8 +106,18 @@ export const WorkedHoursSummary: React.FC<WorkedHoursSummaryProps> = ({ logs }) 
                     <p className="font-semibold text-slate-800">{item.employeeName}</p>
                     <p className="text-xs text-slate-500">{new Date(item.date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' })}</p>
                 </div>
-                <div className="font-mono text-slate-900">
-                    {formatTime(item.workedTime)}
+                <div className="flex items-center gap-2">
+                    {item.workedTime !== null && !item.lunchDeducted && (
+                        <span
+                            className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-800"
+                            title="No se registró comida: el total no descuenta el tiempo de comida y puede estar inflado."
+                        >
+                            ⚠ sin comida
+                        </span>
+                    )}
+                    <span className="font-mono text-slate-900">
+                        {formatTime(item.workedTime)}
+                    </span>
                 </div>
             </div>
           )) : (

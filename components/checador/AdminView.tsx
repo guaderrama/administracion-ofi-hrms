@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import type { LogEntry, DetailedEmployee, PermissionRequest } from '../../types';
-import { LogType, PermissionType, Compensation } from '../../types';
+import { LogType, PermissionType, Compensation, CompensationMethod } from '../../types';
 import { EMPLOYEES } from '../../checadorConstants';
 import { AdminLogTable } from './AdminLogTable';
 import { IncidentsReport } from './IncidentsReport';
@@ -9,6 +9,7 @@ import { DownloadIcon } from './icons/DownloadIcon';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, fetchSignInMethodsForEmail } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../../src/firebaseConfig';
+import { deleteField } from 'firebase/firestore';
 import { employeesService, logsService, permissionsService, cleanDuplicateLogs, tardinessService, motivationalService, toleranceService, vacationRequestsService, type TardinessAdjustment, type MotivationalSettings, type ToleranceSettings, type VacationRequestRecord } from '../../src/services/firestoreService';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -379,6 +380,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   // Estado para restablecer contraseña
   const [resettingPasswordForId, setResettingPasswordForId] = useState<string | null>(null);
 
+  // Estado para bloqueo/desbloqueo de usuario
+  const [togglingActiveForId, setTogglingActiveForId] = useState<string | null>(null);
+
   // Estado para edición de logs de asistencia
   const [editingLog, setEditingLog] = useState<LogEntry | null>(null);
   const [isLogEditModalOpen, setIsLogEditModalOpen] = useState(false);
@@ -467,27 +471,81 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
   }, []);
 
   const calculatedOwedHours = useMemo(() => {
-    const owedByEmployee: { [key: string]: number } = {};
+    const owedMinutes: { [key: string]: number } = {};
+    const compensatedMinutes: { [key: string]: number } = {};
 
-    permissionRequests.forEach(req => {
-        if (req.compensation === Compensation.EXTRA_TIME) {
-            const employeeFullName = `${req.lastName} ${req.motherLastName} ${req.firstName}`.toUpperCase().replace(/\s+/g, ' ').trim();
-            const detailedEmp = findDetailedEmployee(employeeFullName, detailedEmployees);
-            const minutesToCompensate = calculateMinutesToCompensate(req, detailedEmp);
+    // 1. Calcular minutos totales a reponer por empleado
+    const approvedExtraTime = permissionRequests.filter(req =>
+        req.compensation === Compensation.EXTRA_TIME &&
+        req.adminApproval?.status === 'aprobado'
+    );
 
-            if (!owedByEmployee[employeeFullName]) {
-                owedByEmployee[employeeFullName] = 0;
+    approvedExtraTime.forEach(req => {
+        const employeeFullName = `${req.lastName} ${req.motherLastName} ${req.firstName}`.toUpperCase().replace(/\s+/g, ' ').trim();
+        const detailedEmp = findDetailedEmployee(employeeFullName, detailedEmployees);
+        const minutes = calculateMinutesToCompensate(req, detailedEmp);
+        owedMinutes[employeeFullName] = (owedMinutes[employeeFullName] || 0) + minutes;
+    });
+
+    // 2. Calcular minutos ya compensados desde logs reales
+    approvedExtraTime.forEach(req => {
+        if (!req.compensationStartDate || !req.compensationMethod) return;
+        const employeeFullName = `${req.lastName} ${req.motherLastName} ${req.firstName}`.toUpperCase().replace(/\s+/g, ' ').trim();
+        const detailedEmp = findDetailedEmployee(employeeFullName, detailedEmployees);
+        if (!detailedEmp) return;
+
+        const startDate = new Date(req.compensationStartDate + 'T00:00:00');
+        const today = new Date();
+        today.setHours(23, 59, 59, 999);
+
+        const cursor = new Date(startDate);
+        while (cursor <= today) {
+            const dateStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+            const schedInfo = getScheduleInfoForDate(detailedEmp, dateStr);
+
+            if (schedInfo.durationMin > 0) {
+                const dayStart = new Date(cursor).setHours(0, 0, 0, 0);
+                const dayEnd = dayStart + 86400000;
+                const dayLogs = allLogs.filter(log =>
+                    log.timestamp >= dayStart && log.timestamp < dayEnd && (
+                        (log.employeeCode && log.employeeCode === detailedEmp.codigo) ||
+                        log.employeeName.toUpperCase().trim() === employeeFullName
+                    )
+                );
+
+                if (req.compensationMethod === CompensationMethod.ARRIVE_EARLIER) {
+                    const entrada = dayLogs.find(l => l.type === LogType.ENTRADA);
+                    if (entrada) {
+                        const d = new Date(entrada.timestamp);
+                        const arrivalMin = d.getHours() * 60 + d.getMinutes();
+                        if (arrivalMin < schedInfo.startMin) {
+                            compensatedMinutes[employeeFullName] = (compensatedMinutes[employeeFullName] || 0) + (schedInfo.startMin - arrivalMin);
+                        }
+                    }
+                } else {
+                    const salida = [...dayLogs].filter(l => l.type === LogType.SALIDA).pop();
+                    if (salida) {
+                        const d = new Date(salida.timestamp);
+                        const departMin = d.getHours() * 60 + d.getMinutes();
+                        if (departMin > schedInfo.endMin) {
+                            compensatedMinutes[employeeFullName] = (compensatedMinutes[employeeFullName] || 0) + (departMin - schedInfo.endMin);
+                        }
+                    }
+                }
             }
-            owedByEmployee[employeeFullName] += minutesToCompensate;
+            cursor.setDate(cursor.getDate() + 1);
         }
     });
 
-    for (const empName in owedByEmployee) {
-        owedByEmployee[empName] = owedByEmployee[empName] / 60;
+    // 3. Restar compensado del adeudado
+    const result: { [key: string]: number } = {};
+    for (const empName in owedMinutes) {
+        const remaining = Math.max(0, owedMinutes[empName] - (compensatedMinutes[empName] || 0));
+        result[empName] = remaining / 60;
     }
 
-    return owedByEmployee;
-  }, [permissionRequests, detailedEmployees]);
+    return result;
+  }, [permissionRequests, detailedEmployees, allLogs]);
 
   const filteredLogs = useMemo(() => {
     const start = new Date(startDate).setHours(0, 0, 0, 0);
@@ -1055,6 +1113,62 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
       }
     } finally {
       setResettingPasswordForId(null);
+    }
+  };
+
+  const handleToggleActive = async (employee: DetailedEmployee) => {
+    const isCurrentlyActive = employee.activo !== false;
+    const action = isCurrentlyActive ? 'Bloquear' : 'Reactivar';
+    const fullName = `${employee.nombres} ${employee.paterno} ${employee.materno}`;
+
+    if (isCurrentlyActive) {
+      const confirmBlock = window.confirm(
+        `¿${action} el acceso de ${fullName}?\n\n` +
+        `Motivo: Renuncia / Baja\n\n` +
+        `El colaborador perderá acceso inmediato a la plataforma.\n` +
+        `Sus registros históricos se conservarán.`
+      );
+      if (!confirmBlock) return;
+    } else {
+      const confirmReactivate = window.confirm(
+        `¿Reactivar el acceso de ${fullName}?\n\n` +
+        `El colaborador podrá iniciar sesión nuevamente.`
+      );
+      if (!confirmReactivate) return;
+    }
+
+    setTogglingActiveForId(employee.id);
+
+    try {
+      if (isCurrentlyActive) {
+        await employeesService.update(employee.id, {
+          activo: false,
+          fechaBaja: new Date().toISOString().slice(0, 10),
+          motivoBaja: 'Renuncia',
+        });
+      } else {
+        const empRef = doc(db, 'detailed_employees', employee.id);
+        await setDoc(empRef, { activo: true, fechaBaja: deleteField(), motivoBaja: deleteField() }, { merge: true });
+      }
+
+      if (employee.firebaseUid) {
+        const userRef = doc(db, 'users', employee.firebaseUid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          await setDoc(userRef, { activo: isCurrentlyActive ? false : true }, { merge: true });
+        }
+      }
+
+      toast.success(
+        isCurrentlyActive
+          ? `${fullName} ha sido dado de baja. Ya no podrá acceder a la plataforma.`
+          : `${fullName} ha sido reactivado exitosamente.`
+      );
+    } catch (error: unknown) {
+      console.error('Error al cambiar estado del colaborador:', error);
+      toast.error('Error al cambiar el estado del colaborador.');
+    } finally {
+      setTogglingActiveForId(null);
     }
   };
 
@@ -1638,31 +1752,51 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         </div>
 
         {/* Horas Pendientes */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
-                <h2 className="text-xl font-bold text-slate-800 mb-4">Resumen de Horas Pendientes por Reponer</h2>
-                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                    {EMPLOYEES.map(emp => {
-                      const employeeNameKey = emp.name.toUpperCase().replace(/\s+/g, ' ').trim();
-                      const hours = calculatedOwedHours[employeeNameKey] || 0;
-                      return (
-                        <div key={emp.name} className="flex items-center justify-between p-2 bg-slate-50/50 rounded-md border border-slate-200">
-                            <p className="text-sm text-slate-800">{emp.name}</p>
-                            <div className="text-right">
-                              <p className="w-24 text-center px-2 py-1 bg-amber-100/60 rounded-md font-mono font-bold text-amber-900 text-base">
-                                  {hours.toFixed(2)}
-                              </p>
-                              <p className="text-xs text-slate-500">horas</p>
-                            </div>
+        {Object.keys(calculatedOwedHours).length > 0 && (
+        <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
+            <h2 className="text-xl font-bold text-slate-800 mb-4">Horas Pendientes por Reponer</h2>
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                {Object.entries(calculatedOwedHours).map(([empName, remainingHours]) => {
+                  const totalOwed = (() => {
+                    let total = 0;
+                    permissionRequests.forEach(req => {
+                      if (req.compensation !== Compensation.EXTRA_TIME || req.adminApproval?.status !== 'aprobado') return;
+                      const name = `${req.lastName} ${req.motherLastName} ${req.firstName}`.toUpperCase().replace(/\s+/g, ' ').trim();
+                      if (name !== empName) return;
+                      const emp = findDetailedEmployee(name, detailedEmployees);
+                      total += calculateMinutesToCompensate(req, emp);
+                    });
+                    return total / 60;
+                  })();
+                  const compensated = totalOwed - remainingHours;
+                  const pct = totalOwed > 0 ? Math.min(100, (compensated / totalOwed) * 100) : 0;
+
+                  return (
+                    <div key={empName} className="p-3 bg-slate-50/50 rounded-lg border border-slate-200">
+                        <div className="flex items-center justify-between mb-2">
+                            <p className="text-sm font-medium text-slate-800">{empName}</p>
+                            <span className={`font-mono font-bold text-base px-3 py-0.5 rounded-md ${
+                              remainingHours <= 0 ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'
+                            }`}>
+                              {remainingHours.toFixed(1)}h
+                            </span>
                         </div>
-                      )
-                    })}
-                </div>
-                <p className="mt-4 text-xs text-slate-500 text-center">
-                    Este es un cálculo automático basado en las solicitudes de permiso con "Reposición con tiempo de trabajo adicional".
-                </p>
+                        <div className="w-full bg-slate-200 rounded-full h-2 mb-1.5">
+                            <div className={`h-2 rounded-full transition-all ${pct >= 100 ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className="flex justify-between text-[11px] text-slate-500">
+                            <span>Repuesto: {compensated.toFixed(1)}h de {totalOwed.toFixed(1)}h</span>
+                            <span>{pct.toFixed(0)}%</span>
+                        </div>
+                    </div>
+                  );
+                })}
             </div>
+            <p className="mt-3 text-xs text-slate-400 text-center">
+                Calcula automáticamente el tiempo repuesto comparando entradas/salidas reales vs horario del empleado.
+            </p>
         </div>
+        )}
 
         {/* Gestion de Vacaciones */}
         <div className="p-6 bg-white/30 backdrop-blur-lg rounded-xl shadow-lg border border-white/20">
@@ -2324,7 +2458,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                         </thead>
                         <tbody className="divide-y divide-slate-200">
                             {detailedEmployees.length > 0 ? detailedEmployees.map(emp => (
-                                <tr key={emp.id} className="hover:bg-slate-100/50">
+                                <tr key={emp.id} className={`hover:bg-slate-100/50 ${emp.activo === false ? 'bg-red-50/60 opacity-60' : ''}`}>
                                     {canEdit && <td className="py-3 px-4 whitespace-nowrap text-sm">
                                         <div className="flex space-x-2">
                                             <button
@@ -2396,6 +2530,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                                                     </button>
                                                 </>
                                             )}
+                                            <span className="border-l border-slate-300 pl-2 ml-1">
+                                            <button
+                                                onClick={() => handleToggleActive(emp)}
+                                                disabled={togglingActiveForId === emp.id}
+                                                className={`px-2 py-1 rounded text-xs font-bold ${emp.activo === false ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
+                                                title={emp.activo === false ? 'Reactivar colaborador' : 'Dar de baja por renuncia'}
+                                            >
+                                                {togglingActiveForId === emp.id ? '...' : emp.activo === false ? 'Reactivar' : 'Baja'}
+                                            </button>
+                                            </span>
                                         </div>
                                     </td>}
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700 font-mono">{emp.codigo}</td>
@@ -2406,7 +2550,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                                             <span className="text-slate-400 italic">Sin email</span>
                                         )}
                                     </td>
-                                    <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-800">{`${emp.nombres} ${emp.paterno} ${emp.materno}`}</td>
+                                    <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-800">
+                                        <div className="flex items-center gap-2">
+                                            {`${emp.nombres} ${emp.paterno} ${emp.materno}`}
+                                            {emp.activo === false && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">
+                                                    BAJA {emp.fechaBaja ? `(${emp.fechaBaja})` : ''}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{emp.puesto}</td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{emp.departamento}</td>
                                     <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-700">{emp.horarioLunesMiercolesViernes}</td>

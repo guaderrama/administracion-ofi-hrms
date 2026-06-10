@@ -24,6 +24,7 @@ export interface UserData {
   role: UserRole;
   displayName?: string;
   createdAt: Date;
+  activo?: boolean;
 }
 
 // Tipos para el contexto
@@ -126,6 +127,13 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
       if (currentUser) {
         // Obtener datos del usuario de Firestore
         const data = await fetchUserData(currentUser.uid);
+        if (data && data.activo === false) {
+          await signOut(auth);
+          setUser(null);
+          setUserData(null);
+          setLoading(false);
+          return;
+        }
         setUserData(data);
       } else {
         setUserData(null);
@@ -193,6 +201,11 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
         const isFirst = await checkIfFirstUser();
         const role: UserRole = isFirst ? 'admin' : 'employee';
         data = await createUserData(result.user, role);
+      }
+
+      if (data.activo === false) {
+        await signOut(auth);
+        throw new Error('Tu cuenta ha sido desactivada. Contacta al administrador.');
       }
 
       setUserData(data);
