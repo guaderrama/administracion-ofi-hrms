@@ -597,6 +597,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         commissionReportIds: Array.from(selectedCommissionIds),
         daysWorked: cleanDaysWorked,
         employeeNotes: cleanNotes,
+        excludedEmployeeIds: Array.from(excludedEmployees),
       };
       if (currentCutId) {
         await payrollCutsService.update(currentCutId, baseCutData as any);
@@ -634,6 +635,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         commissionReportIds: Array.from(selectedCommissionIds),
         daysWorked: cleanDaysWorked,
         employeeNotes: cleanNotes,
+        excludedEmployeeIds: Array.from(excludedEmployees),
       } as any;
       if (currentCutId) {
         await payrollCutsService.update(currentCutId, cutData);
@@ -650,8 +652,9 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
         }
       }
 
-      // Aplicar pagos de préstamos activos (solo si no se aplicó ya para este periodo)
-      for (const emp of employees) {
+      // Aplicar pagos de préstamos activos (solo empleados incluidos)
+      const includedEmployees = employees.filter(e => !excludedEmployees.has(e.id));
+      for (const emp of includedEmployees) {
         const activeLoans = loansService.getActiveByEmployee(allLoans, emp.codigo);
         for (const loan of activeLoans) {
           if (!loan.id) continue;
@@ -687,6 +690,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
     if (cut.daysWorked) setDaysWorked(cut.daysWorked);
     if (cut.commissionReportIds) setSelectedCommissionIds(new Set(cut.commissionReportIds));
     if ((cut as any).employeeNotes) setEmployeeNotes((cut as any).employeeNotes);
+    if ((cut as any).excludedEmployeeIds) setExcludedEmployees(new Set((cut as any).excludedEmployeeIds));
+    else setExcludedEmployees(new Set());
     toast.success(`Corte "${cut.periodLabel}" cargado.`);
   };
 
