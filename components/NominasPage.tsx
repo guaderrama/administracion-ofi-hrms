@@ -41,6 +41,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const [daysWorked, setDaysWorked] = useState<Record<string, number>>({});
   const [originalDays, setOriginalDays] = useState<Record<string, number>>({}); // días calculados por asistencia
   const [employeeNotes, setEmployeeNotes] = useState<Record<string, string>>({});
+  const [excludedEmployees, setExcludedEmployees] = useState<Set<string>>(new Set());
   const [savedCuts, setSavedCuts] = useState<PayrollCut[]>([]);
   const [savingCut, setSavingCut] = useState(false);
   const [showSavedCuts, setShowSavedCuts] = useState(false);
@@ -453,7 +454,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       // Filas
       pdf.setFont('helvetica', 'normal');
       pdf.setFontSize(7);
-      employees.forEach(emp => {
+      employees.filter(emp => !excludedEmployees.has(emp.id)).forEach(emp => {
         const days = daysWorked[emp.id] ?? diasEnPeriodo;
         const salary = calculateSalary(emp, days, diasEnPeriodo);
         const bd = employeeCommissionBreakdown[emp.codigo];
@@ -514,14 +515,15 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   };
 
   const handleGenerateAll = async () => {
+    const activeEmps = employees.filter(emp => !excludedEmployees.has(emp.id));
     setIsGenerating(true);
-    setGeneratingProgress({ current: 0, total: employees.length });
+    setGeneratingProgress({ current: 0, total: activeEmps.length });
     try {
-      for (let i = 0; i < employees.length; i++) {
-        setSelectedEmployee(employees[i]);
-        setGeneratingProgress({ current: i + 1, total: employees.length });
+      for (let i = 0; i < activeEmps.length; i++) {
+        setSelectedEmployee(activeEmps[i]);
+        setGeneratingProgress({ current: i + 1, total: activeEmps.length });
         await new Promise(resolve => setTimeout(resolve, 400));
-        await generatePdf(employees[i]);
+        await generatePdf(activeEmps[i]);
       }
     } catch (error) {
       console.error('Error generating PDFs:', error);
@@ -536,7 +538,8 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   const [currentCutId, setCurrentCutId] = useState<string | null>(null);
 
   const buildCutData = () => {
-    const cutEmployees = employees.map(emp => {
+    const activeEmployees = employees.filter(emp => !excludedEmployees.has(emp.id));
+    const cutEmployees = activeEmployees.map(emp => {
       const days = daysWorked[emp.id] ?? diasEnPeriodo;
       const salary = calculateSalary(emp, days, diasEnPeriodo);
       const vacation = calculateVacation(emp.fechaIngreso);
@@ -734,7 +737,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
   };
 
   const totals = useMemo(() => {
-    return employees.reduce(
+    return employees.filter(emp => !excludedEmployees.has(emp.id)).reduce(
       (acc, emp) => {
         const days = daysWorked[emp.id] ?? diasEnPeriodo;
         const s = calculateSalary(emp, days, diasEnPeriodo);
@@ -746,7 +749,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       },
       { bonoPuntualidad: 0, bonoObjetivos: 0, apoyoGasolina: 0, total: 0 }
     );
-  }, [employees, daysWorked, diasEnPeriodo]);
+  }, [employees, daysWorked, diasEnPeriodo, excludedEmployees]);
 
   // Para los botones de quincena rápida, derivar año/mes actual de la fecha inicio
   const periodoDate = new Date(selectedPeriod.startDate + 'T00:00:00');
@@ -874,7 +877,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
       <Card className="mb-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold text-slate-800">
-            Colaboradores ({employees.length})
+            Colaboradores ({employees.length - excludedEmployees.size}{excludedEmployees.size > 0 ? ` de ${employees.length}` : ''})
             {loadingAttendance && <span className="ml-2 text-sm font-normal text-amber-600">Cargando asistencia...</span>}
           </h2>
           {attendanceError && (
@@ -913,6 +916,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b-2 border-slate-200">
+                {canEdit && <th className="py-3 px-2 text-center font-semibold text-slate-600 text-xs w-8">Incluir</th>}
                 <th className="text-left py-3 px-2 font-semibold text-slate-600 text-xs">Código</th>
                 <th className="text-left py-3 px-2 font-semibold text-slate-600 text-xs">Nombre Completo</th>
                 <th className="text-center py-3 px-2 font-semibold text-slate-600 text-xs">Fecha Ingreso</th>
@@ -939,7 +943,22 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 const salary = calculateSalary(emp, days, diasEnPeriodo);
                 const vacation = calculateVacation(emp.fechaIngreso);
                 return (
-                  <tr key={emp.id} className="border-b border-slate-100 hover:bg-amber-50/50 transition-colors">
+                  <tr key={emp.id} className={`border-b border-slate-100 transition-colors ${excludedEmployees.has(emp.id) ? 'bg-slate-100 opacity-40' : 'hover:bg-amber-50/50'}`}>
+                    {canEdit && (
+                      <td className="py-3 px-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={!excludedEmployees.has(emp.id)}
+                          onChange={() => setExcludedEmployees(prev => {
+                            const next = new Set(prev);
+                            if (next.has(emp.id)) next.delete(emp.id); else next.add(emp.id);
+                            return next;
+                          })}
+                          className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                          title={excludedEmployees.has(emp.id) ? 'Incluir en nómina' : 'Omitir de nómina'}
+                        />
+                      </td>
+                    )}
                     <td className="py-3 px-2 font-mono text-xs text-slate-500">{emp.codigo}</td>
                     <td className="py-3 px-2 font-medium text-slate-800 text-sm">{getEmployeeFullName(emp)}</td>
                     <td className="py-3 px-2 text-center text-xs text-slate-600">{formatDateShort(emp.fechaIngreso)}</td>
@@ -1024,7 +1043,7 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-slate-300 bg-slate-50">
-                <td className="py-3 px-2 font-bold text-slate-700" colSpan={6}>TOTALES</td>
+                <td className="py-3 px-2 font-bold text-slate-700" colSpan={canEdit ? 7 : 6}>TOTALES</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoPuntualidad)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoObjetivos)}</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.apoyoGasolina)}</td>
