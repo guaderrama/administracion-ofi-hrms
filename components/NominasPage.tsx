@@ -1047,6 +1047,14 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
               })}
             </tbody>
             <tfoot>
+              {(() => {
+                const includedCodes = new Set(employees.filter(e => !excludedEmployees.has(e.id)).map(e => e.codigo));
+                const inclCommTotal = Object.entries(employeeCommissions).filter(([code]) => includedCodes.has(code)).reduce((a, [, v]) => a + v, 0);
+                const inclCommCaminata = Object.entries(employeeCommissionBreakdown).filter(([code]) => includedCodes.has(code)).reduce((a, [, v]) => a + v.caminata, 0);
+                const inclCommSemana = Object.entries(employeeCommissionBreakdown).filter(([code]) => includedCodes.has(code)).reduce((a, [, v]) => a + v.semana, 0);
+                const inclLoanTotal = Object.entries(loanDeductions).filter(([code]) => includedCodes.has(code)).reduce((a, [, v]) => a + v, 0);
+                const hasLoansIncluded = Object.entries(loanDeductions).some(([code, v]) => includedCodes.has(code) && v > 0);
+                return (
               <tr className="border-t-2 border-slate-300 bg-slate-50">
                 <td className="py-3 px-2 font-bold text-slate-700" colSpan={canEdit ? 7 : 6}>TOTALES</td>
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.bonoPuntualidad)}</td>
@@ -1054,26 +1062,24 @@ export const NominasPage: React.FC<NominasPageProps> = ({ setView }) => {
                 <td className="py-3 px-2 text-right font-bold text-slate-700">{formatCurrency(totals.apoyoGasolina)}</td>
                 {selectedCommissionIds.size > 0 && (<>
                   <td className="py-3 px-2 text-right font-bold text-amber-700">
-                    {formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.caminata, 0))}
+                    {formatCurrency(inclCommCaminata)}
                   </td>
                   <td className="py-3 px-2 text-right font-bold text-green-700">
-                    {formatCurrency(Object.values(employeeCommissionBreakdown).reduce((a, b) => a + b.semana, 0))}
+                    {formatCurrency(inclCommSemana)}
                   </td>
                 </>)}
-                {Object.values(loanDeductions).some(v => v > 0) && (
+                {hasLoansIncluded && (
                   <td className="py-3 px-2 text-right font-bold text-red-700">
-                    -{formatCurrency(Object.values(loanDeductions).reduce((a, b) => a + b, 0))}
+                    -{formatCurrency(inclLoanTotal)}
                   </td>
                 )}
                 <td className="py-3 px-2 text-right font-bold text-amber-800 text-base">
-                  {formatCurrency(
-                    totals.total
-                    + Object.values(employeeCommissions).reduce((a, b) => a + b, 0)
-                    - Object.values(loanDeductions).reduce((a, b) => a + b, 0)
-                  )}
+                  {formatCurrency(totals.total + inclCommTotal - inclLoanTotal)}
                 </td>
                 {canEdit && <td></td>}
               </tr>
+                );
+              })()}
             </tfoot>
           </table>
         </div>
