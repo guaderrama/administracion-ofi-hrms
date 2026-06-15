@@ -27,6 +27,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
   const [formStartQuincena, setFormStartQuincena] = useState('');
   const [formPaidCount, setFormPaidCount] = useState('0');
   const [isSaving, setIsSaving] = useState(false);
+  const [collapsedLoans, setCollapsedLoans] = useState<Set<string>>(new Set());
 
   // Edición de pago individual
   const [editingLoan, setEditingLoan] = useState<EmployeeLoan | null>(null);
@@ -192,10 +193,24 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
             <Card><p className="text-center text-slate-500 py-8">No hay préstamos activos.</p></Card>
           ) : activoLoans.map(loan => (
             <Card key={loan.id}>
-              <div className="flex justify-between items-start mb-3">
-                <div>
-                  <h3 className="font-bold text-slate-800">{loan.employeeName}</h3>
-                  <p className="text-xs text-slate-500">Código: {loan.employeeCode} — Aprobado: {loan.approvedDate}</p>
+              <button
+                type="button"
+                className="w-full text-left"
+                onClick={() => setCollapsedLoans(prev => {
+                  const next = new Set(prev);
+                  if (next.has(loan.id!)) next.delete(loan.id!); else next.add(loan.id!);
+                  return next;
+                })}
+              >
+              <div className="flex justify-between items-start mb-1">
+                <div className="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-400 transition-transform ${collapsedLoans.has(loan.id!) ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  <div>
+                    <h3 className="font-bold text-slate-800">{loan.employeeName}</h3>
+                    <p className="text-xs text-slate-500">Código: {loan.employeeCode} — Aprobado: {loan.approvedDate}</p>
+                  </div>
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-bold text-slate-900">{fmt(loan.loanAmount)}</p>
@@ -203,8 +218,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
                 </div>
               </div>
 
-              {/* Barra de progreso */}
-              <div className="mb-3">
+              <div className="ml-6 mb-2">
                 <div className="flex justify-between text-xs text-slate-500 mb-1">
                   <span>Pagado: {fmt(loan.paidAmount)}</span>
                   <span>{Math.round(loan.paidAmount / loan.loanAmount * 100)}%</span>
@@ -213,9 +227,10 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
                   <div className="h-2 bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, loan.paidAmount / loan.loanAmount * 100)}%` }} />
                 </div>
               </div>
+              </button>
 
-              {/* Plan de pagos */}
-              <div className="overflow-x-auto">
+              {!collapsedLoans.has(loan.id!) && <>
+              <div className="overflow-x-auto mt-2">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50">
                     <tr>
@@ -309,6 +324,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
                 )}
               </div>
               {loan.notes && <p className="mt-2 text-xs text-slate-500 italic">Nota: {loan.notes}</p>}
+              </>}
             </Card>
           ))}
         </div>
