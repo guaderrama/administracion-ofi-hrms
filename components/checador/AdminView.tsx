@@ -1121,20 +1121,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     const action = isCurrentlyActive ? 'Bloquear' : 'Reactivar';
     const fullName = `${employee.nombres} ${employee.paterno} ${employee.materno}`;
 
+    let isAdminUser = false;
+    if (employee.firebaseUid) {
+      const userSnap = await getDoc(doc(db, 'users', employee.firebaseUid));
+      if (userSnap.exists() && userSnap.data()?.role === 'admin') isAdminUser = true;
+    }
+
     if (isCurrentlyActive) {
-      const confirmBlock = window.confirm(
-        `¿${action} el acceso de ${fullName}?\n\n` +
-        `Motivo: Renuncia / Baja\n\n` +
-        `El colaborador perderá acceso inmediato a la plataforma.\n` +
-        `Sus registros históricos se conservarán.`
-      );
-      if (!confirmBlock) return;
+      const msg = isAdminUser
+        ? `¿Dar de baja de nómina a ${fullName}?\n\nSolo se excluirá de nómina y checador.\nConservará acceso a la plataforma como administrador.`
+        : `¿${action} el acceso de ${fullName}?\n\nMotivo: Renuncia / Baja\n\nEl colaborador perderá acceso inmediato a la plataforma.\nSus registros históricos se conservarán.`;
+      if (!window.confirm(msg)) return;
     } else {
-      const confirmReactivate = window.confirm(
-        `¿Reactivar el acceso de ${fullName}?\n\n` +
-        `El colaborador podrá iniciar sesión nuevamente.`
-      );
-      if (!confirmReactivate) return;
+      if (!window.confirm(`¿Reactivar a ${fullName}?\n\nVolverá a aparecer en nómina y checador.`)) return;
     }
 
     setTogglingActiveForId(employee.id);
@@ -1151,17 +1150,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         await setDoc(empRef, { activo: true, fechaBaja: deleteField(), motivoBaja: deleteField() }, { merge: true });
       }
 
-      if (employee.firebaseUid) {
+      if (employee.firebaseUid && !isAdminUser) {
         const userRef = doc(db, 'users', employee.firebaseUid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          await setDoc(userRef, { activo: isCurrentlyActive ? false : true }, { merge: true });
-        }
+        await setDoc(userRef, { activo: isCurrentlyActive ? false : true }, { merge: true });
       }
 
       toast.success(
         isCurrentlyActive
-          ? `${fullName} ha sido dado de baja. Ya no podrá acceder a la plataforma.`
+          ? (isAdminUser
+              ? `${fullName} dado de baja de nómina. Conserva acceso como administrador.`
+              : `${fullName} ha sido dado de baja. Ya no podrá acceder a la plataforma.`)
           : `${fullName} ha sido reactivado exitosamente.`
       );
     } catch (error: unknown) {
