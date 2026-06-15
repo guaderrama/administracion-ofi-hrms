@@ -537,11 +537,32 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
         }
     });
 
-    // 3. Restar compensado del adeudado
+    // 3. Restar compensado del adeudado, ocultar 5 días después de completar
     const result: { [key: string]: number } = {};
     for (const empName in owedMinutes) {
-        const remaining = Math.max(0, owedMinutes[empName] - (compensatedMinutes[empName] || 0));
-        result[empName] = remaining / 60;
+        const owed = owedMinutes[empName];
+        const compensated = compensatedMinutes[empName] || 0;
+        const remaining = Math.max(0, owed - compensated);
+
+        if (remaining > 0) {
+            result[empName] = remaining / 60;
+        } else {
+            const empRequests = approvedExtraTime.filter(r =>
+                `${r.lastName} ${r.motherLastName} ${r.firstName}`.toUpperCase().replace(/\s+/g, ' ').trim() === empName
+            );
+            const lastCompStart = empRequests.reduce((latest, r) => {
+                if (!r.compensationStartDate) return latest;
+                return r.compensationStartDate > latest ? r.compensationStartDate : latest;
+            }, '');
+            if (lastCompStart) {
+                const completedDate = new Date(lastCompStart + 'T00:00:00');
+                const now = new Date();
+                const daysSince = Math.floor((now.getTime() - completedDate.getTime()) / 86400000);
+                if (daysSince <= 5) {
+                    result[empName] = 0;
+                }
+            }
+        }
     }
 
     return result;
