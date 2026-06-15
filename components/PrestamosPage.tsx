@@ -27,7 +27,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
   const [formStartQuincena, setFormStartQuincena] = useState('');
   const [formPaidCount, setFormPaidCount] = useState('0');
   const [isSaving, setIsSaving] = useState(false);
-  const [collapsedLoans, setCollapsedLoans] = useState<Set<string>>(new Set());
+  const [expandedLoans, setExpandedLoans] = useState<Set<string>>(new Set());
 
   // Edición de pago individual
   const [editingLoan, setEditingLoan] = useState<EmployeeLoan | null>(null);
@@ -196,7 +196,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
               <button
                 type="button"
                 className="w-full text-left"
-                onClick={() => setCollapsedLoans(prev => {
+                onClick={() => setExpandedLoans(prev => {
                   const next = new Set(prev);
                   if (next.has(loan.id!)) next.delete(loan.id!); else next.add(loan.id!);
                   return next;
@@ -204,7 +204,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
               >
               <div className="flex justify-between items-start mb-1">
                 <div className="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-400 transition-transform ${collapsedLoans.has(loan.id!) ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-400 transition-transform ${!expandedLoans.has(loan.id!) ? '' : 'rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                   <div>
@@ -229,7 +229,7 @@ export const PrestamosPage: React.FC<PrestamosPageProps> = ({ setView }) => {
               </div>
               </button>
 
-              {!collapsedLoans.has(loan.id!) && <>
+              {expandedLoans.has(loan.id!) && <>
               <div className="overflow-x-auto mt-2">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50">
