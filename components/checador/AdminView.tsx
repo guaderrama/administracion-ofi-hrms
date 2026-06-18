@@ -2694,6 +2694,61 @@ export const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                 </div>
               </div>
 
+              {/* Horarios */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                <label className="block text-sm font-semibold text-slate-700">Horarios</label>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Lunes, Martes, Miércoles y Viernes</label>
+                  <div className="flex gap-2 items-center">
+                    <select value={editingEmployee.horarioLunesMiercolesViernes?.split(' - ')[0] || '09:00'}
+                      onChange={e => setEditingEmployee({...editingEmployee, horarioLunesMiercolesViernes: `${e.target.value} - ${editingEmployee.horarioLunesMiercolesViernes?.split(' - ')[1] || '18:00'}`})}
+                      className="px-2 py-1.5 border border-slate-300 rounded-md text-sm">{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select>
+                    <span className="text-slate-400">a</span>
+                    <select value={editingEmployee.horarioLunesMiercolesViernes?.split(' - ')[1] || '18:00'}
+                      onChange={e => setEditingEmployee({...editingEmployee, horarioLunesMiercolesViernes: `${editingEmployee.horarioLunesMiercolesViernes?.split(' - ')[0] || '09:00'} - ${e.target.value}`})}
+                      className="px-2 py-1.5 border border-slate-300 rounded-md text-sm">{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Jueves (Caminata de Arte)</label>
+                  <div className="flex gap-2 items-center">
+                    <select value={editingEmployee.horarioJueves === 'No labora' ? 'no' : 'si'}
+                      onChange={e => setEditingEmployee({...editingEmployee, horarioJueves: e.target.value === 'no' ? 'No labora' : `09:00 - 18:00`})}
+                      className="px-2 py-1.5 border border-slate-300 rounded-md text-sm">
+                      <option value="si">Trabaja</option><option value="no">No labora</option>
+                    </select>
+                    {editingEmployee.horarioJueves !== 'No labora' && <>
+                      <select value={editingEmployee.horarioJueves?.split(' - ')[0] || '09:00'}
+                        onChange={e => setEditingEmployee({...editingEmployee, horarioJueves: `${e.target.value} - ${editingEmployee.horarioJueves?.split(' - ')[1] || '18:00'}`})}
+                        className="px-2 py-1.5 border border-slate-300 rounded-md text-sm">{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select>
+                      <span className="text-slate-400">a</span>
+                      <select value={editingEmployee.horarioJueves?.split(' - ')[1] || '18:00'}
+                        onChange={e => setEditingEmployee({...editingEmployee, horarioJueves: `${editingEmployee.horarioJueves?.split(' - ')[0] || '09:00'} - ${e.target.value}`})}
+                        className="px-2 py-1.5 border border-slate-300 rounded-md text-sm">{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select>
+                    </>}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Sábado</label>
+                  <div className="flex gap-2 items-center">
+                    <select value={editingEmployee.horarioSabado === 'No labora' ? 'no' : 'si'}
+                      onChange={e => setEditingEmployee({...editingEmployee, horarioSabado: e.target.value === 'no' ? 'No labora' : `09:00 - 14:00`})}
+                      className="px-2 py-1.5 border border-slate-300 rounded-md text-sm">
+                      <option value="si">Trabaja</option><option value="no">No labora</option>
+                    </select>
+                    {editingEmployee.horarioSabado !== 'No labora' && <>
+                      <select value={editingEmployee.horarioSabado?.split(' - ')[0] || '09:00'}
+                        onChange={e => setEditingEmployee({...editingEmployee, horarioSabado: `${e.target.value} - ${editingEmployee.horarioSabado?.split(' - ')[1] || '14:00'}`})}
+                        className="px-2 py-1.5 border border-slate-300 rounded-md text-sm">{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select>
+                      <span className="text-slate-400">a</span>
+                      <select value={editingEmployee.horarioSabado?.split(' - ')[1] || '14:00'}
+                        onChange={e => setEditingEmployee({...editingEmployee, horarioSabado: `${editingEmployee.horarioSabado?.split(' - ')[0] || '09:00'} - ${e.target.value}`})}
+                        className="px-2 py-1.5 border border-slate-300 rounded-md text-sm">{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select>
+                    </>}
+                  </div>
+                </div>
+              </div>
+
               {/* Bonos */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
